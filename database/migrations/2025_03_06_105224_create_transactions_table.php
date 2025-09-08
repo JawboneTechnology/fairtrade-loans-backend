@@ -1,0 +1,33 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('transactions', function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->uuid('loan_id');
+            $table->uuid('employee_id');
+            $table->decimal('amount', 10, 2);
+            $table->enum('payment_type', ['Manual', 'Automatic', 'Bank_Transfer', 'Mobile_Money', 'Online_Payment', 'Cheque', 'Cash', 'Partial_Payments', 'Early_Repayments', 'Penalty_Payments', 'Refunds'])->default('Manual');
+            $table->string('transaction_reference')->unique();
+            $table->timestamp('transaction_date')->useCurrent();
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('transactions');
+    }
+};
