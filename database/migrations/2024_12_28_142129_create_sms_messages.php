@@ -17,7 +17,7 @@ return new class extends Migration
             $table->text('message');
             $table->enum('status', ['sent', 'failed'])->default('sent');
             $table->string('provider_response')->nullable();
-            $table->unsignedBigInteger('sent_by');
+            $table->string('sent_by');
             $table->timestamps();
         });
     }

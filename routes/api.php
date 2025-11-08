@@ -18,11 +18,15 @@ use App\Http\Controllers\Api\V1\PermissionController;
 use App\Http\Controllers\Api\V1\ImageUploadController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
-
-
+use App\Http\Controllers\Api\V1\MpesaController;
 
 Route::prefix('v1')->group(function () {
     Broadcast::routes(['middleware' => ['auth:sanctum']]);
+
+    // Test route
+        Route::get('test-route', function () {
+            return response()->json(['message' => 'API is working fine'], 200);
+        });
 
      // Unauthenticated routes
     Route::post('/signup', [AuthController::class, 'register']); // Sign Up user
@@ -47,6 +51,39 @@ Route::prefix('v1')->group(function () {
     Route::get('notifications', [NotificationController::class, 'index']);
     Route::get('admins-get', [AdminController::class, 'getAdmins']);
 
+    // Testing SMS Endpoint
+    Route::post('send-test-sms', [SMSController::class, 'testSMS']);
+
+    // M-Pesa Callback Routes (No authentication required for callbacks)
+    Route::prefix('mpesa')->group(function () {
+        // STK Push callbacks
+        Route::post('stk/callback', [MpesaController::class, 'stkCallback'])->name('mpesa.stk-callback');
+        
+        // C2B callbacks
+        Route::post('c2b/validation', [MpesaController::class, 'c2bValidation']);
+        Route::post('c2b/confirmation', [MpesaController::class, 'c2bConfirmation']);
+        
+        // B2C callbacks
+        Route::post('b2c/result', [MpesaController::class, 'b2cResult']);
+        Route::post('b2c/timeout', [MpesaController::class, 'b2cTimeout']);
+        
+        // Transaction Status callbacks
+        Route::post('status/result', [MpesaController::class, 'statusResult']);
+        Route::post('status/timeout', [MpesaController::class, 'statusTimeout']);
+        
+        // Account Balance callbacks
+        Route::post('balance/result', [MpesaController::class, 'balanceResult']);
+        Route::post('balance/timeout', [MpesaController::class, 'balanceTimeout']);
+        
+        // Reversal callbacks
+        Route::post('reversal/result', [MpesaController::class, 'reversalResult']);
+        Route::post('reversal/timeout', [MpesaController::class, 'reversalTimeout']);
+        
+        // B2B callbacks
+        Route::post('b2b/result', [MpesaController::class, 'b2bResult']);
+        Route::post('b2b/timeout', [MpesaController::class, 'b2bTimeout']);
+    });
+
      // Group Authenticated routes
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/profile', [AuthController::class, 'profile']);
@@ -67,6 +104,23 @@ Route::prefix('v1')->group(function () {
 
         Route::get('loan/user/recent', [LoanController::class, 'getRecentLoan']); // Get user's recent loan
         Route::get('loan/user', [LoanController::class, 'getUserLoans']); // Get the user's loans
+
+        // M-Pesa Payment Routes (Authenticated)
+        Route::prefix('mpesa')->group(function () {
+            // Method 1: App-based payments
+            Route::post('loan-payment', [MpesaController::class, 'initiateLoanPayment']); // Loan payment via app
+            Route::post('stk-push', [MpesaController::class, 'initiateStkPush']); // General STK Push
+            
+            // Transaction management
+            Route::get('transactions', [MpesaController::class, 'getUserTransactions']); // Get user transactions
+            Route::post('query-status', [MpesaController::class, 'queryTransactionStatus']); // Query transaction status
+            
+            // Loan information for paybill users
+            Route::get('loan-info/{loan_identifier}', [MpesaController::class, 'getLoanPaymentInfo']); // Get loan payment info
+            
+            // Testing endpoints
+            Route::post('test-notification', [MpesaController::class, 'testPaymentNotification']); // Test SMS notification
+        });
         Route::get('loan/user/loan-details', [LoanController::class, 'getUserLoanDetails']); // Get user single loan details
         Route::get('loan/user/payments', [LoanController::class, 'getUserLoanPayments']); // Get user payments
         Route::delete('loan/user/payment', [LoanController::class, 'deleteUserLoanPayment']); // Delete a user single payment

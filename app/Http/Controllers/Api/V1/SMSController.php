@@ -80,4 +80,33 @@ class SMSController extends Controller
     {
         return $this->smsService->getSentSMSDataTable();
     }
+
+    /**
+     * Test SMS endpoint to verify controller is working.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function testSMS(Request $request): \Illuminate\Http\JsonResponse
+    {
+        try {
+            // Basic test without validation
+            $recipient = $request->input('recipient', '+254700000000'); // Default test number
+            $message = $request->input('message', 'Test SMS from API');
+
+            $sms = $this->smsService->sendSMS($recipient, $message);
+            
+            return response()->json([
+                'success' => true, 
+                'message' => 'SMS sent successfully.', 
+                'data' => $sms
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false, 
+                'message' => 'SMS sending failed.', 
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

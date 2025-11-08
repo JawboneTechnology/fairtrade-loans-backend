@@ -10,6 +10,7 @@ use App\Services\AuthService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use App\Http\Requests\LoginRequest;
+use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use Illuminate\Support\Facades\Auth;
@@ -263,7 +264,7 @@ class AuthController extends Controller
             }
 
             $restrictedRoles = ['supervisor', 'admin', 'manager', 'super-admin', 'hr'];
-
+            
             if ($user->roles->pluck('name')->intersect($restrictedRoles)->isNotEmpty()) {
                 return response()->json([
                     'success' => false,
