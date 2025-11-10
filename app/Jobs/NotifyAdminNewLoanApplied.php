@@ -32,6 +32,7 @@ class NotifyAdminNewLoanApplied implements ShouldQueue
         try {
             // Get admin email from environment
             $adminEmail = env('APP_SYSTEM_ADMIN');
+            $adminPhone = env('APP_SYSTEM_ADMIN_PHONE');
 
             // Get Loan type
             $loanType = LoanType::findOrFail($this->loan->loan_type_id)->name;
@@ -68,6 +69,28 @@ class NotifyAdminNewLoanApplied implements ShouldQueue
                 $loanType,
                 $adminDashboardUrl
             ));
+
+            // Send SMS to admin as well (queued)
+                try {
+                    if (!empty($administrator->phone_number)) {
+                        $smsMessage = "New loan application from {$applicantName} for KES " . number_format($this->loan->loan_amount, 2) . ", Loan: {$this->loan->loan_number}. View: {$adminDashboardUrl}";
+
+                        Log::info('Dispatching SendSMSJob for admin', ['phone' => $administrator->phone_number, 'loan_id' => $this->loan->id]);
+                        SendSMSJob::dispatch($administrator->phone_number, $smsMessage)->onQueue('sms');
+
+                        // Optional synchronous fallback for debugging (set FORCE_SEND_SMS_SYNC=true in .env)
+                        if (env('FORCE_SEND_SMS_SYNC', false)) {
+                            try {
+                                app(SMSService::class)->sendSMS($administrator->phone_number, $smsMessage);
+                                Log::info('Synchronous admin SMS sent (FORCE_SEND_SMS_SYNC enabled)', ['phone' => $administrator->phone_number]);
+                            } catch (\Throwable $ex) {
+                                Log::error('Synchronous admin SMS failed', ['error' => $ex->getMessage()]);
+                            }
+                        }
+                    }
+                } catch (\Exception $e) {
+                    Log::error('Failed to dispatch admin SMS for new loan application: ' . $e->getMessage());
+                }
         } catch (\Exception $e) {
             Log::error("Error in NotifyAdminNewLoanApplied job: " . $e->getMessage() . " Line: " . $e->getLine());
         }

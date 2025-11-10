@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('recipient');
             $table->text('message');
             $table->enum('status', ['sent', 'failed'])->default('sent');
-            $table->string('provider_response')->nullable();
+            $table->json('provider_response')->nullable();
             $table->string('sent_by');
             $table->timestamps();
         });

@@ -15,17 +15,20 @@ class SendSMSJob implements ShouldQueue
 
     public $recipient;
     public $message;
+    public $sentBy;
 
     /**
      * Create a new job instance.
      *
      * @param string $recipient
      * @param string $message
+     * @param string|null $sentBy
      */
-    public function __construct(string $recipient, string $message)
+    public function __construct(string $recipient, string $message, ?string $sentBy = null)
     {
         $this->recipient = $recipient;
         $this->message = $message;
+        $this->sentBy = $sentBy;
     }
 
     /**
@@ -36,6 +39,6 @@ class SendSMSJob implements ShouldQueue
      */
     public function handle(SMSService $smsService)
     {
-        $smsService->sendSMS($this->recipient, $this->message);
+        $smsService->sendSMS($this->recipient, $this->message, $this->sentBy);
     }
 }

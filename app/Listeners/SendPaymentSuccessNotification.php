@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Events\PaymentSuccessful;
 use App\Jobs\SendPaymentSuccessfulSMSJob;
+use App\Notifications\PaymentReceivedNotification;
 use App\Services\SMSService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Queue\InteractsWithQueue;
@@ -12,25 +13,28 @@ use Illuminate\Support\Facades\Log;
 class SendPaymentSuccessNotification implements ShouldQueue
 {
     use InteractsWithQueue;
-
-    protected SMSService $smsService;
-
-    /**
-     * Create the event listener.
-     */
-    public function __construct(SMSService $smsService)
-    {
-        $this->smsService = $smsService;
-    }
+    
 
     /**
      * Handle the event.
      */
-    public function handle(PaymentSuccessful $event): void
+    public function handle(PaymentSuccessful $event, SMSService $smsService): void
     {
         try {
             // Option 1: Direct SMS sending (current approach)
-            $this->sendSMSDirectly($event);
+            $this->sendSMSDirectly($event, $smsService);
+
+            // Send email notification as well (mirrors OTP flow)
+            $applicantName = $event->user->first_name . ' ' . $event->user->last_name;
+            try {
+                $event->user->notify(new PaymentReceivedNotification($applicantName, $event->transaction, $event->loan));
+                Log::info('Payment received email notification queued', [
+                    'user_id' => $event->user->id,
+                    'transaction_id' => $event->transaction->transaction_id
+                ]);
+            } catch (\Exception $e) {
+                Log::error('Failed to queue payment email notification', ['error' => $e->getMessage()]);
+            }
 
             // Option 2: Dispatch job for SMS sending (alternative robust approach)
             // $this->dispatchSMSJob($event);
@@ -63,8 +67,8 @@ class SendPaymentSuccessNotification implements ShouldQueue
         // Create payment success SMS message
         $message = $this->buildPaymentSuccessMessage($event);
 
-        // Send SMS notification
-        $this->smsService->sendSMS($phoneNumber, $message);
+    // Send SMS notification
+    $smsService->sendSMS($phoneNumber, $message);
 
         Log::info('Payment success SMS sent directly', [
             'user_id'        => $event->user->id,

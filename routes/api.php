@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\V1\ImageUploadController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\MpesaController;
+use App\Http\Controllers\Api\V1\MpesaCallbackController;
 
 Route::prefix('v1')->group(function () {
     Broadcast::routes(['middleware' => ['auth:sanctum']]);
@@ -54,19 +55,27 @@ Route::prefix('v1')->group(function () {
     // Testing SMS Endpoint
     Route::post('send-test-sms', [SMSController::class, 'testSMS']);
 
+    // Public endpoint to register callback URLs (C2B/B2C)
     // M-Pesa Callback Routes (No authentication required for callbacks)
+    Route::post('register-callbacks', [MpesaCallbackController::class, 'register']);
+
+    // C2B callbacks
+    // M-Pesa Callback Routes (No authentication required for callbacks)
+    Route::post('c2b/validation', [MpesaController::class, 'c2bValidation']);
+    Route::post('c2b/confirmation', [MpesaController::class, 'c2bConfirmation']);
+
+    // B2C callbacks
+    Route::post('b2c/result', [MpesaController::class, 'b2cResult']);
+    Route::post('b2c/timeout', [MpesaController::class, 'b2cTimeout']);
+
+    // B2B callbacks
+    Route::post('b2b/result', [MpesaController::class, 'b2bResult']);
+    Route::post('b2b/timeout', [MpesaController::class, 'b2bTimeout']);
+    
     Route::prefix('mpesa')->group(function () {
         // STK Push callbacks
         Route::post('stk/callback', [MpesaController::class, 'stkCallback'])->name('mpesa.stk-callback');
-        
-        // C2B callbacks
-        Route::post('c2b/validation', [MpesaController::class, 'c2bValidation']);
-        Route::post('c2b/confirmation', [MpesaController::class, 'c2bConfirmation']);
-        
-        // B2C callbacks
-        Route::post('b2c/result', [MpesaController::class, 'b2cResult']);
-        Route::post('b2c/timeout', [MpesaController::class, 'b2cTimeout']);
-        
+
         // Transaction Status callbacks
         Route::post('status/result', [MpesaController::class, 'statusResult']);
         Route::post('status/timeout', [MpesaController::class, 'statusTimeout']);
@@ -78,10 +87,6 @@ Route::prefix('v1')->group(function () {
         // Reversal callbacks
         Route::post('reversal/result', [MpesaController::class, 'reversalResult']);
         Route::post('reversal/timeout', [MpesaController::class, 'reversalTimeout']);
-        
-        // B2B callbacks
-        Route::post('b2b/result', [MpesaController::class, 'b2bResult']);
-        Route::post('b2b/timeout', [MpesaController::class, 'b2bTimeout']);
     });
 
      // Group Authenticated routes
@@ -120,6 +125,8 @@ Route::prefix('v1')->group(function () {
             
             // Testing endpoints
             Route::post('test-notification', [MpesaController::class, 'testPaymentNotification']); // Test SMS notification
+            // B2C Disbursement (initiate disbursement to a user by loan number or user id)
+            Route::post('b2c/{identifier}', [MpesaController::class, 'initiateB2CPayment']); // Disburse funds via M-Pesa B2C
         });
         Route::get('loan/user/loan-details', [LoanController::class, 'getUserLoanDetails']); // Get user single loan details
         Route::get('loan/user/payments', [LoanController::class, 'getUserLoanPayments']); // Get user payments

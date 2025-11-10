@@ -8,6 +8,10 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 use App\Events\StkPushRequested;
 use App\Services\MpesaService;
+use App\Services\SMSService;
+use App\Notifications\DisbursementInitiatedNotification;
+use App\Models\User;
+use App\Models\Loan as LoanModel;
 
 class MpesaController extends Controller
 {
@@ -149,8 +153,8 @@ class MpesaController extends Controller
                 ]);
                 
                 return response()->json([
-                    'ResultCode' => 0,
-                    'ResultDesc' => 'Success'
+                    "ResultCode" => "0",
+                    "ResultDesc" => "Accepted",
                 ]);
             } else {
                 Log::warning('C2B Validation failed', [
@@ -160,16 +164,16 @@ class MpesaController extends Controller
                 ]);
                 
                 return response()->json([
-                    'ResultCode' => 1,
-                    'ResultDesc' => $validation['reason']
+                    "ResultCode" => "C2B00014", // Invalid KYC Details
+                    "ResultDesc" => "Rejected",
                 ]);
             }
         } catch (\Exception $e) {
             Log::error('C2B Validation error: ' . $e->getMessage());
             
             return response()->json([
-                'ResultCode' => 1,
-                'ResultDesc' => 'Validation failed'
+                'ResultCode' => "C2B00016", // Other errors
+                'ResultDesc' => 'Rejected'
             ]);
         }
     }
@@ -497,6 +501,95 @@ class MpesaController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to test payment notification',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Initiate B2C disbursement to user identified by loan number or user id/employee id
+     */
+    public function initiateB2CPayment(Request $request, $identifier, MpesaService $mpesaService, SMSService $smsService): JsonResponse
+    {
+        $request->validate([
+            'amount' => 'nullable|numeric|min:1',
+            'command_id' => 'nullable|string',
+            'remarks' => 'nullable|string'
+        ]);
+
+        try {
+            // Try to find loan by loan number first
+            $loan = LoanModel::where('loan_number', $identifier)->first();
+
+            if ($loan) {
+                $user = User::find($loan->employee_id);
+                $amount = $request->input('amount', $loan->loan_amount);
+                $remarks = $request->input('remarks', "Loan disbursement for {$loan->loan_number}");
+            } else {
+                // Try to find user by id or employee_id
+                $user = User::where('id', $identifier)->orWhere('employee_id', $identifier)->first();
+                $amount = $request->input('amount');
+                $remarks = $request->input('remarks', 'Loan disbursement');
+            }
+
+            if (!$user) {
+                return response()->json(['success' => false, 'message' => 'User or loan not found'], 404);
+            }
+
+            if (!$amount) {
+                return response()->json(['success' => false, 'message' => 'Amount is required when no loan is specified'], 400);
+            }
+
+            // Format phone number to 254... (no +)
+            $phone = preg_replace('/[^0-9+]/', '', $user->phone_number);
+            if (str_starts_with($phone, '+')) {
+                $phone = ltrim($phone, '+');
+            }
+            if (str_starts_with($phone, '0')) {
+                $phone = '254' . substr($phone, 1);
+            }
+            if (!str_starts_with($phone, '254')) {
+                $phone = '254' . $phone;
+            }
+
+            $payload = [
+                'amount' => $amount,
+                'phone_number' => $phone,
+                'command_id' => $request->input('command_id', 'BusinessPayment'),
+                'remarks' => $remarks,
+                'occasion' => $request->input('occasion', 'Loan Disbursement'),
+                'user_id' => $user->id,
+                'loan_id' => $loan->id ?? null,
+            ];
+
+            $result = $mpesaService->initiateB2C($payload);
+
+            // Send immediate notification that disbursement was initiated
+            $applicantName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->email ?? 'Customer';
+
+            try {
+                $user->notify(new DisbursementInitiatedNotification($applicantName, (float)$amount, $loan ?? null, $result['data'] ?? null));
+            } catch (\Exception $e) {
+                // Log but do not fail the request
+                \Illuminate\Support\Facades\Log::error('Failed to queue disbursement email', ['error' => $e->getMessage()]);
+            }
+
+            // Send SMS informing the user that the disbursement has been initiated
+            try {
+                $smsMessage = "Dear {$applicantName}, a disbursement of KES " . number_format($amount, 2) . " has been initiated to your mobile number. We will notify you when the payment is completed.";
+                $smsService->sendSMS($phone, $smsMessage, $user->id ?? null);
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::error('Failed to send disbursement SMS', ['error' => $e->getMessage()]);
+            }
+
+            return response()->json($result);
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error initiating B2C disbursement: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to initiate disbursement',
                 'error' => $e->getMessage()
             ], 500);
         }

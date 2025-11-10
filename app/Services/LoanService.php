@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Event;
 use App\Jobs\NotifyAdminNewLoanApplied;
 use App\Jobs\NotifyApplicantLoanPlaced;
+use App\Jobs\NotifyApplicantLoanCanceled;
 use Illuminate\Database\Eloquent\Collection;
 
 class LoanService
@@ -348,7 +349,34 @@ class LoanService
         $employee->loan_limit -= $data['approved_amount'];
         $employee->save();
 
-        TODO: // Dispatch a job to send SMS notification to the employee
+
+        // Dispatch a job to send SMS notification to the employee
+        try {
+            $recipientPhone = $employee->phone_number ?? null;
+
+            if (!empty($recipientPhone)) {
+                $message = "Dear {$employee->first_name}, your loan application (Loan No: {$loan->loan_number}) has been approved for KES " . number_format($data['approved_amount'], 2) . ". You will receive a notification once the money has been sent to your M-Pesa number.";
+
+                Log::info('Dispatching SendSMSJob for loan approval', ['phone' => $recipientPhone, 'loan_id' => $loan->id]);
+
+                // Queue the SMS job on the sms queue
+                SendSMSJob::dispatch($recipientPhone, $message, $employee->id)->onQueue('sms');
+
+                // Optional synchronous fallback for debugging
+                if (env('FORCE_SEND_SMS_SYNC', false)) {
+                    try {
+                        app(\App\Services\SMSService::class)->sendSMS($recipientPhone, $message);
+                        Log::info('Synchronous loan approval SMS sent (FORCE_SEND_SMS_SYNC enabled)', ['phone' => $recipientPhone]);
+                    } catch (\Throwable $ex) {
+                        Log::error('Synchronous loan approval SMS failed', ['error' => $ex->getMessage()]);
+                    }
+                }
+            } else {
+                Log::warning('Loan approval SMS not sent: no phone number for employee', ['loan_id' => $loan->id, 'employee_id' => $employee->id ?? null]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Failed to dispatch loan approval SMS: ' . $e->getMessage(), ['loan_id' => $loan->id]);
+        }
     }
 
     private function reject(Loan $loan, array $data): void
@@ -360,7 +388,39 @@ class LoanService
             'remarks' => $data['remarks'] ?? null,
         ]);
 
-        TODO: // Dispatch a job to send SMS notification to the employee
+        // Dispatch email notification job for the rejected loan
+        try {
+            NotifyApplicantLoanCanceled::dispatch($loan);
+        } catch (\Exception $e) {
+            Log::error('Failed to dispatch NotifyApplicantLoanCanceled job: ' . $e->getMessage(), ['loan_id' => $loan->id]);
+        }
+
+        // Send SMS to the employee informing them of rejection
+        try {
+            $employee = $loan->employee;
+            $recipientPhone = $employee->phone_number ?? null;
+
+            if (!empty($recipientPhone)) {
+                $message = "Dear {$employee->first_name}, your loan application (Loan No: {$loan->loan_number}) has been rejected. Remarks: " . ($data['remarks'] ?? 'No remarks provided') . ".";
+
+                Log::info('Dispatching SendSMSJob for loan rejection', ['phone' => $recipientPhone, 'loan_id' => $loan->id]);
+                SendSMSJob::dispatch($recipientPhone, $message, $employee->id)->onQueue('sms');
+
+                // Optional synchronous fallback for debugging
+                if (env('FORCE_SEND_SMS_SYNC', false)) {
+                    try {
+                        app(\App\Services\SMSService::class)->sendSMS($recipientPhone, $message);
+                        Log::info('Synchronous loan rejection SMS sent (FORCE_SEND_SMS_SYNC enabled)', ['phone' => $recipientPhone]);
+                    } catch (\Throwable $ex) {
+                        Log::error('Synchronous loan rejection SMS failed', ['error' => $ex->getMessage()]);
+                    }
+                }
+            } else {
+                Log::warning('Loan rejection SMS not sent: no phone number for employee', ['loan_id' => $loan->id, 'employee_id' => $employee->id ?? null]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Failed to dispatch loan rejection SMS: ' . $e->getMessage(), ['loan_id' => $loan->id]);
+        }
     }
 
     private function generateLoanNumber(): string

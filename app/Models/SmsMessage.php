@@ -16,4 +16,8 @@ class SmsMessage extends Model
         'provider_response',
         'sent_by',
     ];
+
+    protected $casts = [
+        'provider_response' => 'array',
+    ];
 }

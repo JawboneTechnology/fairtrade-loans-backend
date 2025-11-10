@@ -361,19 +361,19 @@ class MpesaService
 
             // Create a transaction record in your existing transactions table
             $loanTransaction = \App\Models\Transaction::create([
-                'id' => Str::uuid(),
-                'loan_id' => $loan->id,
-                'employee_id' => $loan->employee_id,
-                'amount' => $transaction->amount,
-                'payment_type' => 'Mobile_Money',
+                'id'                    => Str::uuid(),
+                'loan_id'               => $loan->id,
+                'employee_id'           => $loan->employee_id,
+                'amount'                => $transaction->amount,
+                'payment_type'          => 'Mobile_Money',
                 'transaction_reference' => $transaction->mpesa_receipt_number ?? $transaction->transaction_id,
-                'transaction_date' => $transaction->transaction_date ?? now(),
+                'transaction_date'      => $transaction->transaction_date ?? now(),
             ]);
 
             // Determine payment method for SMS
             $paymentMethod = $transaction->payment_method === 'PAYBILL' ? 'M-Pesa Paybill' : 'M-Pesa (App)';
 
-            // Fire payment successful event for SMS notification
+            //TODO: Fire payment successful event for SMS notification
             event(new PaymentSuccessful(
                 $transaction,
                 $loan,
@@ -516,6 +516,47 @@ class MpesaService
             return [
                 'found' => false,
                 'message' => 'Error retrieving loan information'
+            ];
+        }
+    }
+
+    /**
+     * Register C2B callback URLs with Safaricom (uses the iankumu/mpesa package)
+     *
+     * @param string|null $shortcode
+     * @return array
+     */
+    public function registerC2BUrls(?string $shortcode = null): array
+    {
+        try {
+            $shortcode = $shortcode ?? config('mpesa.shortcode');
+
+            if (empty($shortcode)) {
+                return [
+                    'success' => false,
+                    'message' => 'Shortcode not configured'
+                ];
+            }
+
+            $response = Mpesa::c2bregisterURLS($shortcode);
+
+            // Illuminate HTTP client response
+            if (method_exists($response, 'successful') && $response->successful()) {
+                return [
+                    'success' => true,
+                    'data' => $response->json()
+                ];
+            }
+
+            return [
+                'success' => false,
+                'data' => $response->body()
+            ];
+        } catch (\Throwable $e) {
+            Log::error('Error registering C2B URLs with Safaricom: ' . $e->getMessage());
+            return [
+                'success' => false,
+                'message' => $e->getMessage()
             ];
         }
     }
