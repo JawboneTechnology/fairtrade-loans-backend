@@ -87,7 +87,7 @@
 <body>
 <div class="email-container">
     <div class="logo-container">
-        <img src="http://localhost:8000/fairtrade-logo.png" alt="Fairtrade Logo" style="max-height: 80px;">
+        <img src="{{ asset('fairtrade-logo.png') }}" alt="Fairtrade Logo" style="max-height: 80px;">
     </div>
     <div class="email-header">
         <h2>New User Registration</h2>

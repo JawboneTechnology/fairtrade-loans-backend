@@ -70,7 +70,7 @@
 <table class="email-container" cellpadding="0" cellspacing="0" width="600">
     <tr>
         <td class="logo-container">
-            <img src="http://localhost:8000/fairtrade-logo.png" alt="Company Logo" style="max-height: 80px;">
+            <img src="{{ asset('fairtrade-logo.png') }}" alt="Company Logo" style="max-height: 80px;">
         </td>
     </tr>
     <tr>

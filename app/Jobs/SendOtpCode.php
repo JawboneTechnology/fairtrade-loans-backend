@@ -99,12 +99,12 @@ class SendOtpCode implements ShouldQueue
                 PasswordReset::create([
                     "reset_code" => $resetCode,
                     "email"      => $email,
-                    "expired_at" => now()->addMinutes(30),
+                    "expires_at" => now()->addMinutes(30),
                 ]);
             } else {
                 $resetToken->update([
                     "reset_code" => $resetCode,
-                    "expired_at" => now()->addMinutes(30),
+                    "expires_at" => now()->addMinutes(30),
                     "updated_at" => now(),
                 ]);
             }

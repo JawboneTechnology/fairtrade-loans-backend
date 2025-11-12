@@ -82,7 +82,7 @@
     <!-- Company Logo -->
     <div class="logo-container">
 {{-- <img src="{{ asset('fairtrade-logo.png') }}" alt="Fairtrade Logo" style="max-height: 80px;">--}}
-        <img src="http://localhost:8000/fairtrade-logo.png" alt="Fairtrade Logo" style="max-height: 80px;">
+        <img src="{{ asset('fairtrade-logo.png') }}" alt="Fairtrade Logo" style="max-height: 80px;">
     </div>
     <div class="email-header">
         <h2>Guarantor Response Notification</h2>

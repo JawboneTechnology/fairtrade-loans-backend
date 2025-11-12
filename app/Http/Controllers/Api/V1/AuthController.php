@@ -247,18 +247,18 @@ class AuthController extends Controller
             $resetCode = rand(100000, 999999);
             $user = User::with('roles')->where('phone_number', $request->phone)->first();
 
-            if (!$user->email_verified_at) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'This account is not verified. Please verify your email address.',
-                    'data' => null
-                ], 404);
-            }
-
             if (!$user) {
                 return response()->json([
                     'success' => false,
                     'message' => 'User not found.',
+                    'data' => null
+                ], 404);
+            }
+
+            if (!$user->email_verified_at) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'This account is not verified. Please verify your email address.',
                     'data' => null
                 ], 404);
             }

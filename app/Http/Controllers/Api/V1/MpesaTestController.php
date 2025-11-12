@@ -80,6 +80,17 @@ class MpesaTestController extends Controller
             
         $credentials = base64_encode($consumerKey . ':' . $consumerSecret);
         
+        // Also test using the package method
+        try {
+            $packageToken = \Iankumu\Mpesa\Facades\Mpesa::generateAccessToken();
+            Log::info('Package token generation successful', [
+                'environment' => $environment,
+                'package_method' => 'generateAccessToken'
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Package token generation failed: ' . $e->getMessage());
+        }
+        
         $curl = curl_init();
         curl_setopt_array($curl, [
             CURLOPT_URL => $url,

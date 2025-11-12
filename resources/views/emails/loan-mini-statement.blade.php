@@ -97,7 +97,7 @@
     <body>
         <div class="email-container">
             <div class="logo-container">
-                <img src="http://localhost:8000/fairtrade-logo.png" alt="Fairtrade Logo">
+                <img src="{{ asset('fairtrade-logo.png') }}" alt="Fairtrade Logo">
             </div>
             <div class="email-header">
                 Loan Mini Statement

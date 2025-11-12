@@ -61,26 +61,26 @@ Route::prefix('v1')->group(function () {
     // M-Pesa Callback Routes (No authentication required for callbacks)
     Route::post('register-callbacks', [MpesaCallbackController::class, 'register']);
     
-    // M-Pesa test routes (for debugging - remove in production)
-    Route::get('mpesa/test-token', [MpesaTestController::class, 'testAccessToken']);
-    Route::get('mpesa/test-c2b', [MpesaTestController::class, 'testC2BRegistration']);
-
     // C2B callbacks
     // M-Pesa Callback Routes (No authentication required for callbacks)
     Route::post('c2b/validation', [MpesaController::class, 'c2bValidation']);
     Route::post('c2b/confirmation', [MpesaController::class, 'c2bConfirmation']);
-
-    // B2C callbacks
-    Route::post('b2c/result', [MpesaController::class, 'b2cResult']);
-    Route::post('b2c/timeout', [MpesaController::class, 'b2cTimeout']);
-
-    // B2B callbacks
-    Route::post('b2b/result', [MpesaController::class, 'b2bResult']);
-    Route::post('b2b/timeout', [MpesaController::class, 'b2bTimeout']);
     
     Route::prefix('mpesa')->group(function () {
+        // M-Pesa test routes (for debugging - remove in production)
+        Route::get('test-token', [MpesaTestController::class, 'testAccessToken']);
+        Route::get('test-c2b', [MpesaTestController::class, 'testC2BRegistration']);
+        
         // STK Push callbacks
         Route::post('stk/callback', [MpesaController::class, 'stkCallback'])->name('mpesa.stk-callback');
+
+        // B2C callbacks
+        Route::post('b2c/result', [MpesaController::class, 'b2cResult']);
+        Route::post('b2c/timeout', [MpesaController::class, 'b2cTimeout']);
+    
+        // B2B callbacks
+        Route::post('b2b/result', [MpesaController::class, 'b2bResult']);
+        Route::post('b2b/timeout', [MpesaController::class, 'b2bTimeout']);
 
         // Transaction Status callbacks
         Route::post('status/result', [MpesaController::class, 'statusResult']);

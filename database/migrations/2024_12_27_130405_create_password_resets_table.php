@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->string('email')->index();
             $table->string('reset_code');
-            $table->timestamp('expires_at');
+            $table->timestamp('expires_at')->nullable();
             $table->timestamps();
         });
     }

@@ -91,6 +91,11 @@ $cfg['Servers'][$i]['controlpass'] = 'strong-password-here';
 sudo systemctl restart nginx
 sudo systemctl restart php8.1-fpm  # Adjust PHP version
 
+## phpmyadmin Login
+accesspoint: http://72.61.18.245:9000
+username: deploy
+password: Deploy@loans2025
+
 ## Laravel Scheduler For Loan applicants repayment reminder
 
 # Open crontab
@@ -105,3 +110,46 @@ php artisan schedule:list
 
 # Test run manually
 php artisan schedule:run
+
+## Queue Supervisor
+
+sudo vim /etc/supervisor/conf.d/laravel-worker.conf
+
+[program:laravel-worker]
+process_name=%(program_name)s_%(process_num)02d
+command=php /var/www/html/fairtrade-loans-backend/artisan queue:work --sleep=3 --tries=3
+autostart=true
+autorestart=true
+user=deploy
+numprocs=1
+redirect_stderr=true
+stdout_logfile=/var/www/html/fairtrade-loans-backend/storage/logs/worker.log
+stopwaitsecs=3600
+
+# Reread the configuration
+sudo supervisorctl reread
+
+# Update the configuration
+sudo supervisorctl update
+
+# Start the worker
+sudo supervisorctl start laravel-worker:*
+
+# Check status
+sudo supervisorctl status
+
+# Restart supervisor
+sudo supervisorctl start all
+sudo supervisorctl status
+
+# Clear application cache
+php artisan config:clear
+php artisan cache:clear
+php artisan queue:restart
+
+# Restart PHP-FPM and web server if needed
+sudo systemctl restart php8.1-fpm
+sudo systemctl restart nginx
+
+tail -f storage/logs/laravel.log
+sudo supervisorctl tail -f laravel-worker:laravel-worker_00

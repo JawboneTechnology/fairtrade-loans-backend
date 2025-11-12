@@ -563,29 +563,110 @@ class MpesaService
      */
     private function refreshAccessToken(): array
     {
-        try {
-            $environment = config('mpesa.environment', 'sandbox');
-            
-            if ($environment === 'live' || $environment === 'production') {
-                $tokenResponse = Mpesa::generateLiveToken();
-                Log::info('Live token generation response: ', ['environment' => 'live']);
-            } else {
-                $tokenResponse = Mpesa::generateSandBoxToken();
-                Log::info('Sandbox token generation response: ', ['environment' => 'sandbox']);
+        $environment = config('mpesa.environment', 'sandbox');
+
+        $maxAttempts = 4;
+        $attempt = 0;
+
+        while ($attempt < $maxAttempts) {
+            $attempt++;
+
+            try {
+                // The iankumu/mpesa package exposes a single token generation method
+                $tokenResponse = Mpesa::generateAccessToken();
+
+                // If the package returned an HTTP client Response object, try to extract useful info
+                if (is_object($tokenResponse) && method_exists($tokenResponse, 'body')) {
+                    $raw = $tokenResponse->body();
+                } else {
+                    $raw = is_string($tokenResponse) ? $tokenResponse : json_encode($tokenResponse);
+                }
+
+                // Detect Incapsula or HTML blocking
+                if ($this->isIncapsulaHtml($raw)) {
+                    $incident = $this->extractIncapsulaIncidentId($raw);
+                    $msg = 'Incapsula block detected during token generation' . ($incident ? ' (incident: ' . $incident . ')' : '');
+                    Log::warning($msg, ['environment' => $environment, 'attempt' => $attempt, 'raw' => substr($raw, 0, 600)]);
+                    return [
+                        'success' => false,
+                        'error' => $msg,
+                        'incapsula_incident' => $incident,
+                    ];
+                }
+
+                Log::info('Access token generation response', [
+                    'environment' => $environment,
+                    'attempt' => $attempt,
+                    'token_generated' => !empty($tokenResponse)
+                ]);
+
+                return [
+                    'success' => true,
+                    'environment' => $environment,
+                    'token_response' => $tokenResponse
+                ];
+
+            } catch (\Throwable $e) {
+                // If we hit a server-side block or transient error, retry with backoff
+                $rawMsg = $e->getMessage();
+                Log::warning('Token generation attempt failed', [
+                    'environment' => $environment,
+                    'attempt' => $attempt,
+                    'error' => $rawMsg
+                ]);
+
+                if ($attempt >= $maxAttempts) {
+                    Log::error('Token refresh failed after attempts: ' . $rawMsg, ['environment' => $environment]);
+                    return [
+                        'success' => false,
+                        'error' => $rawMsg
+                    ];
+                }
+
+                // exponential backoff (in microseconds)
+                $sleep = (int) (500000 * (2 ** ($attempt - 1))); // 0.5s, 1s, 2s, ...
+                usleep($sleep);
+                continue;
             }
-            
-            return [
-                'success' => true,
-                'environment' => $environment,
-                'token_response' => $tokenResponse
-            ];
-        } catch (\Exception $e) {
-            Log::error('Token refresh failed: ' . $e->getMessage());
-            return [
-                'success' => false,
-                'error' => $e->getMessage()
-            ];
         }
+
+        return [
+            'success' => false,
+            'error' => 'Token refresh failed'
+        ];
+    }
+
+    /**
+     * Detect whether the given response body is an Incapsula / HTML block page
+     */
+    private function isIncapsulaHtml($body): bool
+    {
+        if (empty($body) || !is_string($body)) {
+            return false;
+        }
+
+        $lower = strtolower($body);
+        if (strpos($lower, 'incapsula') !== false || strpos($lower, 'request unsuccessful') !== false || strpos($lower, 'iframe id="main-iframe"') !== false) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Try to extract Incapsula incident id from HTML
+     */
+    private function extractIncapsulaIncidentId(string $body): ?string
+    {
+        if (preg_match('/incident_id=([0-9\-]+)/i', $body, $m)) {
+            return $m[1];
+        }
+
+        if (preg_match('/Incapsula incident ID:\s*([0-9\-]+)/i', $body, $m2)) {
+            return $m2[1];
+        }
+
+        return null;
     }
 
     /**
@@ -618,34 +699,116 @@ class MpesaService
                 ];
             }
 
-            $response = Mpesa::c2bregisterURLS($shortcode);
-            
-            Log::info('C2B URL registration response: ', [
+            // Add a small delay to ensure token is ready
+            usleep(500000); // 0.5 seconds
+
+            // Clear config cache to ensure fresh values
+            \Artisan::call('config:clear');
+
+            Log::info('About to call c2bregisterURLS with shortcode: ' . $shortcode, [
                 'environment' => $tokenRefresh['environment'],
-                'response_body' => $response->body(),
-                'response_status' => $response->status(),
-                'response_headers' => $response->headers()
+                'consumer_key_length' => strlen(config('mpesa.mpesa_consumer_key', '')),
+                'consumer_secret_length' => strlen(config('mpesa.mpesa_consumer_secret', '')),
+                'validation_url' => config('mpesa.c2b_validation_url'),
+                'confirmation_url' => config('mpesa.c2b_confirmation_url'),
             ]);
 
-            // Check if response is successful
-            if (method_exists($response, 'successful') && $response->successful()) {
-                $responseData = $response->json();
-                return [
-                    'success' => true,
-                    'data' => $responseData,
-                    'environment' => $tokenRefresh['environment']
-                ];
+            $maxAttempts = 3;
+            $attempt = 0;
+            $finalResponse = null;
+
+            while ($attempt < $maxAttempts) {
+                $attempt++;
+                try {
+                    $response = Mpesa::c2bregisterURLS($shortcode);
+                    $finalResponse = $response;
+
+                    $body = method_exists($response, 'body') ? $response->body() : (is_string($response) ? $response : json_encode($response));
+                    $status = method_exists($response, 'status') ? $response->status() : null;
+
+                    // Detect Incapsula HTML
+                    if ($this->isIncapsulaHtml($body)) {
+                        $incident = $this->extractIncapsulaIncidentId($body);
+                        Log::warning('Incapsula block detected during C2B registration', [
+                            'attempt' => $attempt,
+                            'incident' => $incident,
+                            'status' => $status
+                        ]);
+
+                        return [
+                            'success' => false,
+                            'data' => $body,
+                            'http_status' => $status,
+                            'environment' => $tokenRefresh['environment'],
+                            'error_message' => 'Blocked by Incapsula',
+                            'incapsula_incident' => $incident
+                        ];
+                    }
+
+                    Log::info('C2B URL registration response', [
+                        'environment' => $tokenRefresh['environment'],
+                        'attempt' => $attempt,
+                        'status' => $status,
+                        'body_preview' => substr($body, 0, 600)
+                    ]);
+
+                    if (method_exists($response, 'successful') && $response->successful()) {
+                        $responseData = $response->json();
+                        return [
+                            'success' => true,
+                            'data' => $responseData,
+                            'environment' => $tokenRefresh['environment']
+                        ];
+                    }
+
+                    // For 401/403 retryable statuses, attempt again unless last try
+                    if (in_array($status, [401, 403]) && $attempt < $maxAttempts) {
+                        $sleep = (int) (500000 * (2 ** ($attempt - 1)));
+                        usleep($sleep);
+                        continue;
+                    }
+
+                    // Not successful and not retrying further
+                    if (method_exists($response, 'json')) {
+                        $responseBody = $response->json();
+                    } else {
+                        $responseBody = is_string($response) ? json_decode($response, true) : $response;
+                    }
+
+                    return [
+                        'success' => false,
+                        'data' => $responseBody,
+                        'http_status' => $status,
+                        'environment' => $tokenRefresh['environment'],
+                        'error_message' => 'Registration failed with HTTP status: ' . $status
+                    ];
+
+                } catch (\Throwable $e) {
+                    Log::warning('C2B registration attempt failed', ['attempt' => $attempt, 'error' => $e->getMessage()]);
+                    if ($attempt >= $maxAttempts) {
+                        Log::error('C2B registration failed after attempts', ['error' => $e->getMessage()]);
+                        return [
+                            'success' => false,
+                            'message' => 'C2B registration test failed',
+                            'error' => $e->getMessage()
+                        ];
+                    }
+                    $sleep = (int) (500000 * (2 ** ($attempt - 1)));
+                    usleep($sleep);
+                    continue;
+                }
             }
 
-            // Handle different types of responses
-            $responseBody = $response->json() ?? json_decode($response->body(), true);
-            
+            // If we exit loop without returning, return final response info
+            $body = $finalResponse && method_exists($finalResponse, 'body') ? $finalResponse->body() : null;
+            $status = $finalResponse && method_exists($finalResponse, 'status') ? $finalResponse->status() : null;
+
             return [
                 'success' => false,
-                'data' => $responseBody,
-                'http_status' => $response->status(),
+                'data' => $body,
+                'http_status' => $status,
                 'environment' => $tokenRefresh['environment'],
-                'error_message' => 'Registration failed with HTTP status: ' . $response->status()
+                'error_message' => 'Registration failed after retries'
             ];
 
         } catch (\Throwable $e) {

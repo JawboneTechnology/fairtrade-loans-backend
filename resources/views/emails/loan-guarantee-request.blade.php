@@ -111,7 +111,7 @@
     <div class="email-container">
         <!-- Company Logo at the Top -->
         <div class="logo-container">
-            <img src="http://localhost:8000/fairtrade-logo.png" alt="Fairtrade Logo" style="max-height: 80px;">
+            <img src="{{ asset('fairtrade-logo.png') }}" alt="Fairtrade Logo" style="max-height: 80px;">
         </div>
         <div class="email-header">
             <h2>Loan Guarantee Request</h2>
