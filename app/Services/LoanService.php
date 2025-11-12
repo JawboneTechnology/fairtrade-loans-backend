@@ -787,5 +787,276 @@ class LoanService
         $userId = auth()->user()->id;
         return (new \App\Models\Loan)->getUserLoanStats($userId);
     }
+
+    /**
+     * Send installment reminders to users with active loans
+     * This runs twice - once as early reminder, once as due date reminder
+     */
+    public function sendInstallmentReminders(): array
+    {
+        $results = ['sent' => 0, 'failed' => 0, 'errors' => []];
+
+        try {
+            // Get loans that need installment reminders
+            // Send reminders 7 days before due date and 1 day before due date
+            $reminderDates = [
+                now()->addDays(7)->startOfDay(),  // 7 days before
+                now()->addDays(1)->startOfDay(),  // 1 day before
+            ];
+
+            foreach ($reminderDates as $index => $reminderDate) {
+                $reminderType = $index === 0 ? 'early' : 'final';
+                
+                $loans = Loan::with(['employee'])
+                    ->where('loan_status', 'approved')
+                    ->where('loan_balance', '>', 0)
+                    ->whereDate('next_due_date', '=', $reminderDate)
+                    ->get();
+
+                foreach ($loans as $loan) {
+                    try {
+                        $this->sendInstallmentReminderSMS($loan, $reminderType);
+                        
+                        // Create loan notification record
+                        \App\Models\LoanNotification::create([
+                            'loan_id' => $loan->id,
+                            'user_id' => $loan->employee_id,
+                            'notification_type' => 'installment_reminder',
+                            'channel' => 'sms',
+                            'phone_number' => $loan->employee->phone_number,
+                            'amount' => $loan->monthly_installment,
+                            'status' => 'sent',
+                            'sent_at' => now(),
+                            'metadata' => [
+                                'reminder_type' => $reminderType,
+                                'due_date' => $loan->next_due_date->toDateString(),
+                                'days_until_due' => now()->diffInDays($loan->next_due_date, false),
+                            ],
+                        ]);
+                        
+                        $results['sent']++;
+                    } catch (\Exception $e) {
+                        $errorMessage = 'Failed to send installment reminder SMS: ' . $e->getMessage();
+                        $results['errors'][] = $errorMessage;
+                        
+                        // Create failed notification record
+                        \App\Models\LoanNotification::create([
+                            'loan_id' => $loan->id,
+                            'user_id' => $loan->employee_id,
+                            'notification_type' => 'installment_reminder',
+                            'channel' => 'sms',
+                            'phone_number' => $loan->employee->phone_number ?? '',
+                            'amount' => $loan->monthly_installment,
+                            'status' => 'failed',
+                            'failure_reason' => $errorMessage,
+                            'metadata' => [
+                                'reminder_type' => $reminderType,
+                                'error_details' => $e->getMessage(),
+                            ],
+                        ]);
+                        
+                        Log::error('Failed to send installment reminder SMS', [
+                            'loan_id' => $loan->id,
+                            'loan_number' => $loan->loan_number,
+                            'reminder_type' => $reminderType,
+                            'error' => $e->getMessage()
+                        ]);
+                        $results['failed']++;
+                    }
+                }
+            }
+
+            Log::info('Installment reminders processing completed', $results);
+            return $results;
+
+        } catch (\Exception $e) {
+            Log::error('Error in sendInstallmentReminders: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Send overdue notifications to users with overdue loans
+     */
+    public function sendOverdueNotifications(): array
+    {
+        $results = ['sent' => 0, 'failed' => 0, 'errors' => []];
+
+        try {
+            // Get overdue loans (past due date)
+            $overdueLoans = Loan::with(['employee'])
+                ->where('loan_status', 'approved')
+                ->where('loan_balance', '>', 0)
+                ->where('next_due_date', '<', now()->startOfDay())
+                ->get();
+
+            foreach ($overdueLoans as $loan) {
+                try {
+                    $this->sendOverdueNotificationSMS($loan);
+                    
+                    // Create loan notification record
+                    \App\Models\LoanNotification::create([
+                        'loan_id' => $loan->id,
+                        'user_id' => $loan->employee_id,
+                        'notification_type' => 'overdue_notification',
+                        'channel' => 'sms',
+                        'phone_number' => $loan->employee->phone_number,
+                        'amount' => $loan->monthly_installment,
+                        'status' => 'sent',
+                        'sent_at' => now(),
+                        'metadata' => [
+                            'due_date' => $loan->next_due_date->toDateString(),
+                            'days_overdue' => now()->diffInDays($loan->next_due_date, false),
+                            'outstanding_balance' => $loan->loan_balance,
+                        ],
+                    ]);
+                    
+                    $results['sent']++;
+                } catch (\Exception $e) {
+                    $errorMessage = 'Failed to send overdue notification SMS: ' . $e->getMessage();
+                    $results['errors'][] = $errorMessage;
+                    
+                    // Create failed notification record
+                    \App\Models\LoanNotification::create([
+                        'loan_id' => $loan->id,
+                        'user_id' => $loan->employee_id,
+                        'notification_type' => 'overdue_notification',
+                        'channel' => 'sms',
+                        'phone_number' => $loan->employee->phone_number ?? '',
+                        'amount' => $loan->monthly_installment,
+                        'status' => 'failed',
+                        'failure_reason' => $errorMessage,
+                        'metadata' => [
+                            'error_details' => $e->getMessage(),
+                            'outstanding_balance' => $loan->loan_balance,
+                        ],
+                    ]);
+                    
+                    Log::error('Failed to send overdue notification SMS', [
+                        'loan_id' => $loan->id,
+                        'loan_number' => $loan->loan_number,
+                        'error' => $e->getMessage()
+                    ]);
+                    $results['failed']++;
+                }
+            }
+
+            Log::info('Overdue notifications processing completed', $results);
+            return $results;
+
+        } catch (\Exception $e) {
+            Log::error('Error in sendOverdueNotifications: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Send installment reminder SMS to a loan holder
+     */
+    private function sendInstallmentReminderSMS(Loan $loan, string $reminderType): void
+    {
+        $employee = $loan->employee;
+        
+        if (empty($employee->phone_number)) {
+            Log::warning('No phone number for installment reminder', [
+                'loan_id' => $loan->id,
+                'employee_id' => $employee->id
+            ]);
+            return;
+        }
+
+        $daysUntilDue = now()->diffInDays($loan->next_due_date, false);
+        $employeeName = $employee->first_name;
+
+        if ($reminderType === 'early') {
+            $message = "Dear {$employeeName}, your loan installment of KES " . number_format($loan->monthly_installment, 2) . 
+                      " for loan {$loan->loan_number} is due in {$daysUntilDue} days on " . 
+                      $loan->next_due_date->format('M j, Y') . ". Please prepare for payment.";
+        } else {
+            $message = "Dear {$employeeName}, REMINDER: Your loan installment of KES " . number_format($loan->monthly_installment, 2) . 
+                      " for loan {$loan->loan_number} is due tomorrow (" . 
+                      $loan->next_due_date->format('M j, Y') . "). Please ensure timely payment.";
+        }
+
+        // Dispatch SMS job
+        SendSMSJob::dispatch($employee->phone_number, $message, $employee->id)->onQueue('sms');
+
+        // Optional synchronous fallback for debugging
+        if (env('FORCE_SEND_SMS_SYNC', false)) {
+            try {
+                app(\App\Services\SMSService::class)->sendSMS($employee->phone_number, $message);
+                Log::info('Synchronous installment reminder SMS sent', [
+                    'phone' => $employee->phone_number,
+                    'reminder_type' => $reminderType
+                ]);
+            } catch (\Throwable $ex) {
+                Log::error('Synchronous installment reminder SMS failed', [
+                    'error' => $ex->getMessage(),
+                    'reminder_type' => $reminderType
+                ]);
+            }
+        }
+
+        Log::info('Installment reminder SMS dispatched', [
+            'loan_id' => $loan->id,
+            'loan_number' => $loan->loan_number,
+            'phone' => $employee->phone_number,
+            'reminder_type' => $reminderType,
+            'due_date' => $loan->next_due_date,
+            'amount' => $loan->monthly_installment
+        ]);
+    }
+
+    /**
+     * Send overdue notification SMS to a loan holder
+     */
+    private function sendOverdueNotificationSMS(Loan $loan): void
+    {
+        $employee = $loan->employee;
+        
+        if (empty($employee->phone_number)) {
+            Log::warning('No phone number for overdue notification', [
+                'loan_id' => $loan->id,
+                'employee_id' => $employee->id
+            ]);
+            return;
+        }
+
+        $daysOverdue = now()->diffInDays($loan->next_due_date, false);
+        $employeeName = $employee->first_name;
+
+        $message = "Dear {$employeeName}, your loan installment of KES " . number_format($loan->monthly_installment, 2) . 
+                  " for loan {$loan->loan_number} is now {$daysOverdue} days OVERDUE. " . 
+                  "Outstanding balance: KES " . number_format($loan->loan_balance, 2) . 
+                  ". Please pay immediately to avoid penalties.";
+
+        // Dispatch SMS job
+        SendSMSJob::dispatch($employee->phone_number, $message, $employee->id)->onQueue('sms');
+
+        // Optional synchronous fallback for debugging
+        if (env('FORCE_SEND_SMS_SYNC', false)) {
+            try {
+                app(\App\Services\SMSService::class)->sendSMS($employee->phone_number, $message);
+                Log::info('Synchronous overdue notification SMS sent', [
+                    'phone' => $employee->phone_number,
+                    'days_overdue' => $daysOverdue
+                ]);
+            } catch (\Throwable $ex) {
+                Log::error('Synchronous overdue notification SMS failed', [
+                    'error' => $ex->getMessage(),
+                    'days_overdue' => $daysOverdue
+                ]);
+            }
+        }
+
+        Log::info('Overdue notification SMS dispatched', [
+            'loan_id' => $loan->id,
+            'loan_number' => $loan->loan_number,
+            'phone' => $employee->phone_number,
+            'days_overdue' => $daysOverdue,
+            'amount_due' => $loan->monthly_installment,
+            'balance' => $loan->loan_balance
+        ]);
+    }
 }
 

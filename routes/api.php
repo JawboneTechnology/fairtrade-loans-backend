@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AdminController;
+use App\Http\Controllers\Api\V1\AdminAuditController;
 use App\Http\Controllers\Api\V1\DependentController;
 use App\Http\Controllers\Api\V1\GrantController;
 use App\Http\Controllers\Api\V1\GrantTypeController;
@@ -174,6 +175,15 @@ Route::prefix('v1')->group(function () {
             Route::post('grants/{grantId}/approve', [GrantController::class, 'approve']);
             Route::post('grants/{grantId}/reject', [GrantController::class, 'reject']);
             Route::post('grants/{grantId}/paid', [GrantController::class, 'markAsPaid']);
+
+            // Admin Audit Routes
+            Route::prefix('admin/audit')->group(function () {
+                Route::get('loan-notifications', [AdminAuditController::class, 'getLoanNotifications']);
+                Route::get('system-activities', [AdminAuditController::class, 'getSystemActivities']);
+                Route::get('recent-activities', [AdminAuditController::class, 'getRecentActivities']);
+                Route::get('notification-stats', [AdminAuditController::class, 'getNotificationStats']);
+                Route::get('system-metrics', [AdminAuditController::class, 'getSystemMetrics']);
+            });
 
             Route::get('grant-types', [GrantTypeController::class, 'index']);
             Route::post('grant-types', [GrantTypeController::class, 'store']);

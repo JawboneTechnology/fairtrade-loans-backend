@@ -39,6 +39,14 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withSchedule(function (Schedule $schedule) {
         // Schedule the loan deductions command to run every night at midnight
         $schedule->command('loans:deduct')->dailyAt('00:00');
+        
+        // Schedule loan installment reminders twice per month (15th and 30th)
+        $schedule->command('loans:notify-installments')->monthlyOn(15, '09:00');
+        $schedule->command('loans:notify-installments')->monthlyOn(30, '09:00');
+        
+        // Schedule overdue notifications every Monday and Thursday
+        $schedule->command('loans:notify-installments --overdue')->weekly()->mondays()->at('10:00');
+        $schedule->command('loans:notify-installments --overdue')->weekly()->thursdays()->at('10:00');
     })
 
     ->withExceptions(function (Exceptions $exceptions) {

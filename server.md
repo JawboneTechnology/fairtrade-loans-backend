@@ -90,3 +90,18 @@ $cfg['Servers'][$i]['controlpass'] = 'strong-password-here';
 
 sudo systemctl restart nginx
 sudo systemctl restart php8.1-fpm  # Adjust PHP version
+
+## Laravel Scheduler For Loan applicants repayment reminder
+
+# Open crontab
+sudo crontab -e
+
+# Add this single line (replace with your actual path)
+* * * * * cd /var/www/your-loan-api && php artisan schedule:run >> /dev/null 2>&1
+
+# Check scheduled tasks
+cd /var/www/your-loan-api
+php artisan schedule:list
+
+# Test run manually
+php artisan schedule:run

@@ -10,6 +10,8 @@ use App\Notifications\AdminGrantAppliedNotification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
+use App\Jobs\SendSMSJob;
+use App\Services\SMSService;
 
 class NotifyAdminGrantApplication implements ShouldQueue
 {
@@ -54,6 +56,29 @@ class NotifyAdminGrantApplication implements ShouldQueue
                     $grantType,
                     $applicant
                 ));
+
+                // Send SMS to admin as well (queued)
+                try {
+                    if (!empty($admin->phone_number)) {
+                        $applicantName = $applicant->first_name . ' ' . $applicant->last_name;
+                        $smsMessage = "New grant application from {$applicantName} for {$grantType->name} of KES " . number_format($this->grant->amount, 2) . ". Please review.";
+
+                        Log::info('Dispatching SendSMSJob for admin (grant)', ['phone' => $admin->phone_number, 'grant_id' => $this->grant->id]);
+                        SendSMSJob::dispatch($admin->phone_number, $smsMessage)->onQueue('sms');
+
+                        // Optional synchronous fallback for debugging
+                        if (env('FORCE_SEND_SMS_SYNC', false)) {
+                            try {
+                                app(SMSService::class)->sendSMS($admin->phone_number, $smsMessage);
+                                Log::info('Synchronous grant admin SMS sent (FORCE_SEND_SMS_SYNC enabled)', ['phone' => $admin->phone_number]);
+                            } catch (\Throwable $ex) {
+                                Log::error('Synchronous grant admin SMS failed', ['error' => $ex->getMessage()]);
+                            }
+                        }
+                    }
+                } catch (\Exception $e) {
+                    Log::error('Failed to dispatch grant admin SMS: ' . $e->getMessage(), ['grant_id' => $this->grant->id]);
+                }
 
                 Log::info('Admin notification sent successfully', [
                     'grant_id' => $this->grant->id,

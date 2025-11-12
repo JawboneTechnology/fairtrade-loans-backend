@@ -354,10 +354,20 @@ class MpesaService
             $oldBalance = $loan->loan_balance;
             $newBalance = max(0, $oldBalance - $transaction->amount);
 
-            // Update loan balance
-            $loan->update([
-                'loan_balance' => $newBalance
-            ]);
+            // Update loan balance and status
+            $updateData = ['loan_balance' => $newBalance];
+            
+            // Mark loan as completed when balance reaches zero
+            if ($newBalance <= 0) {
+                $updateData['loan_status'] = 'completed';
+                Log::info('Loan fully paid - marking as completed', [
+                    'loan_id' => $loan->id,
+                    'loan_number' => $loan->loan_number,
+                    'final_payment_amount' => $transaction->amount
+                ]);
+            }
+            
+            $loan->update($updateData);
 
             // Create a transaction record in your existing transactions table
             $loanTransaction = \App\Models\Transaction::create([
@@ -544,13 +554,13 @@ class MpesaService
             if (method_exists($response, 'successful') && $response->successful()) {
                 return [
                     'success' => true,
-                    'data' => $response->json()
+                    'data' => data_get($response->json())
                 ];
             }
 
             return [
                 'success' => false,
-                'data' => $response->body()
+                'data' => data_get($response->body())
             ];
         } catch (\Throwable $e) {
             Log::error('Error registering C2B URLs with Safaricom: ' . $e->getMessage());

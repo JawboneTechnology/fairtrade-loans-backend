@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use App\Notifications\GrantApplicationReceivedNotification;
+use App\Jobs\SendSMSJob;
+use App\Services\SMSService;
 
 class NotifyUserGrantApplication implements ShouldQueue
 {
@@ -41,6 +43,29 @@ class NotifyUserGrantApplication implements ShouldQueue
                 $grantType,
                 $applicant
             ));
+
+            // Send SMS to applicant as well (queued)
+            try {
+                if (!empty($applicant->phone_number)) {
+                    $applicantName = $applicant->first_name . ' ' . $applicant->last_name;
+                    $smsMessage = "Dear {$applicantName}, your grant application for {$grantType->name} of KES " . number_format($this->grant->amount, 2) . " has been received and is under review.";
+
+                    Log::info('Dispatching SendSMSJob for grant applicant', ['phone' => $applicant->phone_number, 'grant_id' => $this->grant->id]);
+                    SendSMSJob::dispatch($applicant->phone_number, $smsMessage, $applicant->id)->onQueue('sms');
+
+                    // Optional synchronous fallback for debugging
+                    if (env('FORCE_SEND_SMS_SYNC', false)) {
+                        try {
+                            app(SMSService::class)->sendSMS($applicant->phone_number, $smsMessage);
+                            Log::info('Synchronous grant application SMS sent (FORCE_SEND_SMS_SYNC enabled)', ['phone' => $applicant->phone_number]);
+                        } catch (\Throwable $ex) {
+                            Log::error('Synchronous grant application SMS failed', ['error' => $ex->getMessage()]);
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                Log::error('Failed to dispatch grant application SMS: ' . $e->getMessage(), ['grant_id' => $this->grant->id]);
+            }
 
             Log::info('User notification sent successfully', [
                 'grant_id' => $this->grant->id,

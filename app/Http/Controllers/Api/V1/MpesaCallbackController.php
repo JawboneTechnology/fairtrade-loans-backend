@@ -99,7 +99,7 @@ class MpesaCallbackController extends Controller
             throw new \RuntimeException('.env file not found or not writable');
         }
 
-        $escaped = preg_replace('/([\\\\\"]/m', '\\$1', $value);
+        $escaped = preg_replace('/([\\\\"])/m', '\\$1', $value);
 
         $contents = file_get_contents($envPath);
 
