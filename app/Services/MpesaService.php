@@ -19,6 +19,15 @@ class MpesaService
     public function initiateStkPush(array $data): array
     {
         try {
+            // Refresh token before making API call
+            $tokenRefresh = $this->refreshAccessToken();
+            if (!$tokenRefresh['success']) {
+                return [
+                    'success' => false,
+                    'message' => 'Failed to refresh access token: ' . $tokenRefresh['error']
+                ];
+            }
+
             // Create pending transaction record
             $transaction = MpesaTransaction::create([
                 'phone_number' => $data['phone_number'],
@@ -49,6 +58,7 @@ class MpesaService
                 ]);
 
                 Log::info('STK Push initiated successfully', [
+                    'environment' => $tokenRefresh['environment'],
                     'transaction_id' => $transaction->transaction_id,
                     'checkout_request_id' => $response['CheckoutRequestID']
                 ]);
@@ -60,6 +70,7 @@ class MpesaService
                         'transaction_id' => $transaction->transaction_id,
                         'checkout_request_id' => $response['CheckoutRequestID'],
                         'merchant_request_id' => $response['MerchantRequestID'] ?? null,
+                        'environment' => $tokenRefresh['environment'],
                     ]
                 ];
             } else {
@@ -452,13 +463,28 @@ class MpesaService
     public function queryTransactionStatus(string $checkoutRequestId): array
     {
         try {
+            // Refresh token before making API call
+            $tokenRefresh = $this->refreshAccessToken();
+            if (!$tokenRefresh['success']) {
+                return [
+                    'success' => false,
+                    'error' => 'Failed to refresh access token: ' . $tokenRefresh['error']
+                ];
+            }
+
             $response = Mpesa::stkStatus([
                 'CheckoutRequestID' => $checkoutRequestId,
             ]);
 
+            Log::info('Transaction status query completed', [
+                'environment' => $tokenRefresh['environment'],
+                'checkout_request_id' => $checkoutRequestId
+            ]);
+
             return [
                 'success' => true,
-                'data' => $response
+                'data' => $response,
+                'environment' => $tokenRefresh['environment']
             ];
 
         } catch (\Exception $e) {
@@ -531,6 +557,38 @@ class MpesaService
     }
 
     /**
+     * Force token refresh based on environment
+     *
+     * @return array
+     */
+    private function refreshAccessToken(): array
+    {
+        try {
+            $environment = config('mpesa.environment', 'sandbox');
+            
+            if ($environment === 'live' || $environment === 'production') {
+                $tokenResponse = Mpesa::generateLiveToken();
+                Log::info('Live token generation response: ', ['environment' => 'live']);
+            } else {
+                $tokenResponse = Mpesa::generateSandBoxToken();
+                Log::info('Sandbox token generation response: ', ['environment' => 'sandbox']);
+            }
+            
+            return [
+                'success' => true,
+                'environment' => $environment,
+                'token_response' => $tokenResponse
+            ];
+        } catch (\Exception $e) {
+            Log::error('Token refresh failed: ' . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
      * Register C2B callback URLs with Safaricom (uses the iankumu/mpesa package)
      *
      * @param string|null $shortcode
@@ -548,25 +606,57 @@ class MpesaService
                 ];
             }
 
-            $response = Mpesa::c2bregisterURLS($shortcode);
-
-            // Illuminate HTTP client response
-            if (method_exists($response, 'successful') && $response->successful()) {
+            // Force token refresh before registration
+            Log::info('Attempting to register C2B URLs with shortcode: ' . $shortcode);
+            
+            // Clear any cached token and force regeneration based on environment
+            $tokenRefresh = $this->refreshAccessToken();
+            if (!$tokenRefresh['success']) {
                 return [
-                    'success' => true,
-                    'data' => data_get($response->json())
+                    'success' => false,
+                    'message' => 'Failed to refresh access token: ' . $tokenRefresh['error']
                 ];
             }
 
+            $response = Mpesa::c2bregisterURLS($shortcode);
+            
+            Log::info('C2B URL registration response: ', [
+                'environment' => $tokenRefresh['environment'],
+                'response_body' => $response->body(),
+                'response_status' => $response->status(),
+                'response_headers' => $response->headers()
+            ]);
+
+            // Check if response is successful
+            if (method_exists($response, 'successful') && $response->successful()) {
+                $responseData = $response->json();
+                return [
+                    'success' => true,
+                    'data' => $responseData,
+                    'environment' => $tokenRefresh['environment']
+                ];
+            }
+
+            // Handle different types of responses
+            $responseBody = $response->json() ?? json_decode($response->body(), true);
+            
             return [
                 'success' => false,
-                'data' => data_get($response->body())
+                'data' => $responseBody,
+                'http_status' => $response->status(),
+                'environment' => $tokenRefresh['environment'],
+                'error_message' => 'Registration failed with HTTP status: ' . $response->status()
             ];
+
         } catch (\Throwable $e) {
-            Log::error('Error registering C2B URLs with Safaricom: ' . $e->getMessage());
+            Log::error('Error registering C2B URLs with Safaricom: ' . $e->getMessage(), [
+                'exception' => $e,
+                'trace' => $e->getTraceAsString()
+            ]);
             return [
                 'success' => false,
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
+                'error_type' => get_class($e)
             ];
         }
     }
@@ -577,6 +667,15 @@ class MpesaService
     public function initiateB2C(array $data): array
     {
         try {
+            // Refresh token before making API call
+            $tokenRefresh = $this->refreshAccessToken();
+            if (!$tokenRefresh['success']) {
+                return [
+                    'success' => false,
+                    'message' => 'Failed to refresh access token: ' . $tokenRefresh['error']
+                ];
+            }
+
             $response = Mpesa::b2c([
                 'Amount' => $data['amount'],
                 'PhoneNumber' => $data['phone_number'],
@@ -596,6 +695,7 @@ class MpesaService
             ]);
 
             Log::info('B2C payment initiated', [
+                'environment' => $tokenRefresh['environment'],
                 'transaction_id' => $transaction->transaction_id,
                 'response' => $response
             ]);
@@ -603,7 +703,8 @@ class MpesaService
             return [
                 'success' => true,
                 'message' => 'B2C payment initiated successfully',
-                'data' => $response
+                'data' => $response,
+                'environment' => $tokenRefresh['environment']
             ];
 
         } catch (\Exception $e) {

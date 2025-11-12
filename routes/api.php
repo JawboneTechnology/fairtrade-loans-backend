@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\MpesaController;
 use App\Http\Controllers\Api\V1\MpesaCallbackController;
+use App\Http\Controllers\Api\V1\MpesaTestController;
 
 Route::prefix('v1')->group(function () {
     Broadcast::routes(['middleware' => ['auth:sanctum']]);
@@ -59,6 +60,10 @@ Route::prefix('v1')->group(function () {
     // Public endpoint to register callback URLs (C2B/B2C)
     // M-Pesa Callback Routes (No authentication required for callbacks)
     Route::post('register-callbacks', [MpesaCallbackController::class, 'register']);
+    
+    // M-Pesa test routes (for debugging - remove in production)
+    Route::get('mpesa/test-token', [MpesaTestController::class, 'testAccessToken']);
+    Route::get('mpesa/test-c2b', [MpesaTestController::class, 'testC2BRegistration']);
 
     // C2B callbacks
     // M-Pesa Callback Routes (No authentication required for callbacks)
