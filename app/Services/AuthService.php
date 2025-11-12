@@ -191,7 +191,7 @@ class AuthService
                 throw new \Exception("No reset code found for this email.");
             }
 
-            if ($resetData->reset_code !== $code) {
+            if ($resetData->reset_code !== (string) $code) {
                 Log::error("Incorrect reset code provided for email: " . $user->email);
                 throw new \Exception("The reset code is incorrect.");
             }
