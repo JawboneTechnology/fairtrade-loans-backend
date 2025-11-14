@@ -10,6 +10,7 @@ set -e  # Exit on any error
 PROJECT_ROOT="/var/www/html/fairtrade-loans-backend"
 BRANCH="${1:-main}"
 USER="deploy"
+ENV_FILE="$PROJECT_ROOT/.env"
 
 echo "======================================"
 echo "Laravel Deployment Script"
@@ -47,6 +48,12 @@ cd $PROJECT_ROOT
 # Check if we're in the right directory
 if [ ! -f "artisan" ]; then
     log "ERROR: artisan file not found. Are you in the correct Laravel project directory?"
+    exit 1
+fi
+
+# Check if .env file exists
+if [ ! -f "$ENV_FILE" ]; then
+    log "ERROR: .env file not found!"
     exit 1
 fi
 
@@ -98,6 +105,10 @@ php artisan view:cache
 log "Running database migrations..."
 php artisan migrate --force
 
+# Optional: Run database seeder (uncomment if needed)
+# log "Running database seeder..."
+# php artisan db:seed --force
+
 # Clear and cache events & routes again after migrations
 log "Refreshing cached files..."
 php artisan event:cache
@@ -125,7 +136,6 @@ fi
 # Set proper file permissions
 log "Setting proper file permissions..."
 sudo chown -R $USER:$USER $PROJECT_ROOT
-sudo chmod -R 755 $PROJECT_ROOT
 sudo chmod -R 775 $PROJECT_ROOT/storage
 sudo chmod -R 775 $PROJECT_ROOT/bootstrap/cache
 
@@ -149,6 +159,10 @@ check_supervisor
 
 log "Checking application status..."
 curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://localhost || log "Could not check application status"
+
+# Show application info
+log "Application information:"
+php artisan about
 
 echo "======================================"
 echo "Deployment Summary"
