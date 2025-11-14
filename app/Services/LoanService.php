@@ -726,6 +726,53 @@ class LoanService
         }
     }
 
+    public function getUserAllLoansWithCalculations(User $user): array
+    {
+        try {
+            // Fetch only active loans with deductions and loan type, ordered by most recent first
+            $loans = Loan::with(['deductions', 'loanType'])
+                ->where('employee_id', $user->id)
+                // ->where('loan_status', 'active')
+                ->orderBy('applied_at', 'desc')
+                ->get();
+
+            if ($loans->isEmpty()) {
+                return [];
+            }
+
+            // Process each loan with calculations
+            return $loans->map(function ($loan) {
+                // Calculate the total amount paid from deductions
+                $totalPaid = collect($loan->deductions)->sum('deduction_amount');
+
+                // Calculate the outstanding amount
+                $outstanding = $loan->loan_amount - $totalPaid;
+
+                // Calculate the percentage complete
+                $percentageComplete = $loan->loan_amount > 0 ? ($totalPaid / $loan->loan_amount) * 100 : 0;
+
+                // Get the loan type name
+                $loanTypeName = $loan->loanType ? $loan->loanType->name : 'N/A';
+
+                // Return the loan details with calculations
+                return [
+                    'id' => $loan->id,
+                    'loan_number' => $loan->loan_number,
+                    'percentage_complete' => round($percentageComplete, 2), // Round to 2 decimal places
+                    'outstanding_amount' => $outstanding,
+                    'amount_paid' => $totalPaid,
+                    'loan_amount' => $loan->loan_amount,
+                    'loan_type_name' => $loanTypeName,
+                    'loan_status' => $loan->loan_status,
+                    'applied_at' => $loan->applied_at,
+                ];
+            })->toArray();
+
+        } catch (\Exception $e) {
+            throw $e;
+        }
+    }
+
     public function getUserLoans(User $user, int $start = 0, int $limit = 10)
     {
         try {

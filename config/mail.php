@@ -113,4 +113,16 @@ return [
         'name' => env('MAIL_FROM_NAME', 'Example'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Support Email Configuration
+    |--------------------------------------------------------------------------
+    |
+    | This option specifies the email address where support messages
+    | will be sent when users submit support requests.
+    |
+    */
+
+    'support_email' => env('SUPPORT_EMAIL', 'support@fairtrade.com'),
+
 ];

@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\MpesaController;
 use App\Http\Controllers\Api\V1\MpesaCallbackController;
 use App\Http\Controllers\Api\V1\MpesaTestController;
+use App\Http\Controllers\Api\V1\SupportController;
 
 Route::prefix('v1')->group(function () {
     Broadcast::routes(['middleware' => ['auth:sanctum']]);
@@ -113,8 +114,9 @@ Route::prefix('v1')->group(function () {
         Route::post('test-loan-acceptance', [LoanController::class, 'testLoanAcceptance']);
         Route::get('/loans/{loanId}/mini-statement', [LoanController::class, 'getMiniStatement']);
 
-        Route::get('loan/user/recent', [LoanController::class, 'getRecentLoan']); // Get user's recent loan
+        Route::get('loan/user/recent', [LoanController::class, 'getRecentLoan']); // Get user's active loans with detailed calculations
         Route::get('loan/user', [LoanController::class, 'getUserLoans']); // Get the user's loans
+        Route::post('support/message', [SupportController::class, 'submitSupportMessage']);
 
         // M-Pesa Payment Routes (Authenticated)
         Route::prefix('mpesa')->group(function () {

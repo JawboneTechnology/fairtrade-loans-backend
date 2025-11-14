@@ -24,6 +24,9 @@ class EventServiceProvider extends ServiceProvider
         \App\Events\MiniStatementSent::class => [
             \App\Listeners\HandleMiniStatement::class,
         ],
+        \App\Events\SupportMessageSubmitted::class => [
+            \App\Listeners\HandleSupportMessageSubmission::class,
+        ],
         // Add other existing event-listener mappings as needed
     ];
 

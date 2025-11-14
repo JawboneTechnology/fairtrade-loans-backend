@@ -443,19 +443,19 @@ class LoanController extends Controller
                 ], 404);
             }
 
-            $loan = $this->loanService->getUserRecentLoan($user);
+            $loans = $this->loanService->getUserAllLoansWithCalculations($user);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Recent loan fetched successfully.',
+                'message' => 'User active loans fetched successfully.',
                 'data' => [
-                    'recent_loan' => $loan,
+                    'loans' => $loans,
                 ],
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to get user recent loan.',
+                'message' => 'Failed to get user loans.',
                 'error' => $e->getMessage(),
             ], 500);
         }
