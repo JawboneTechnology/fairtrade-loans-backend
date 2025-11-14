@@ -41,6 +41,35 @@ check_supervisor() {
     fi
 }
 
+# Function to fix permissions
+fix_permissions() {
+    log "Setting proper file permissions..."
+    
+    # Set ownership to www-data for secure file operations
+    sudo chown -R www-data:www-data $PROJECT_ROOT
+    
+    # Set secure directory permissions
+    sudo find $PROJECT_ROOT -type d -exec chmod 755 {} \;
+    sudo find $PROJECT_ROOT -type f -exec chmod 644 {} \;
+    
+    # Make storage and bootstrap/cache writable
+    sudo chmod -R 775 $PROJECT_ROOT/storage/
+    sudo chmod -R 775 $PROJECT_ROOT/bootstrap/cache/
+    
+    # Ensure specific directories have proper permissions
+    sudo chmod -R 775 $PROJECT_ROOT/storage/framework/views/
+    sudo chmod -R 775 $PROJECT_ROOT/storage/framework/cache/
+    sudo chmod -R 775 $PROJECT_ROOT/storage/framework/sessions/
+    sudo chmod -R 775 $PROJECT_ROOT/storage/logs/
+    
+    # Create necessary directories if they don't exist
+    sudo -u www-data mkdir -p $PROJECT_ROOT/storage/framework/views
+    sudo -u www-data mkdir -p $PROJECT_ROOT/storage/framework/cache
+    sudo -u www-data mkdir -p $PROJECT_ROOT/storage/framework/sessions
+    
+    log "Permissions fixed successfully"
+}
+
 # Change to project directory
 log "Changing to project directory..."
 cd $PROJECT_ROOT
@@ -59,12 +88,12 @@ fi
 
 # Put application in maintenance mode
 log "Putting application in maintenance mode..."
-php artisan down --render="errors::503" --retry=60
+sudo -u www-data php artisan down --render="errors::503" --retry=60
 
 # Function to bring application back up on error
 cleanup() {
     log "ERROR occurred. Bringing application back up..."
-    php artisan up
+    sudo -u www-data php artisan up
     exit 1
 }
 
@@ -73,45 +102,51 @@ trap cleanup ERR
 
 # Git operations
 log "Fetching latest changes from git..."
-git fetch origin
+sudo -u www-data git fetch origin
 
 log "Checking out branch: $BRANCH"
-git checkout $BRANCH
+sudo -u www-data git checkout $BRANCH
 
 log "Pulling latest changes..."
-git pull origin $BRANCH
+sudo -u www-data git pull origin $BRANCH
 
 # Show current commit
-log "Current commit: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%s)"
+log "Current commit: $(sudo -u www-data git rev-parse --short HEAD) - $(sudo -u www-data git log -1 --pretty=%s)"
 
 # Install/Update PHP dependencies
 log "Installing/updating PHP dependencies..."
-composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+sudo -u www-data composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+
+# Fix permissions after composer install
+fix_permissions
 
 # Clear application caches
 log "Clearing application caches..."
-php artisan config:clear
-php artisan cache:clear
-php artisan route:clear
-php artisan view:clear
+sudo -u www-data php artisan config:clear
+sudo -u www-data php artisan cache:clear
+sudo -u www-data php artisan route:clear
+sudo -u www-data php artisan view:clear
 
 # Cache configuration for production
 log "Caching configuration for better performance..."
-php artisan config:cache
-php artisan route:cache
-php artisan view:cache
+sudo -u www-data php artisan config:cache
+sudo -u www-data php artisan route:cache
+sudo -u www-data php artisan view:cache
 
 # Run database migrations (if any)
 log "Running database migrations..."
-php artisan migrate --force
+sudo -u www-data php artisan migrate --force
 
 # Optional: Run database seeder (uncomment if needed)
 # log "Running database seeder..."
-# php artisan db:seed --force
+# sudo -u www-data php artisan db:seed --force
 
 # Clear and cache events & routes again after migrations
 log "Refreshing cached files..."
-php artisan event:cache
+sudo -u www-data php artisan event:cache
+
+# Fix permissions again after all operations
+fix_permissions
 
 # Restart queue workers via supervisor
 log "Restarting queue workers..."
@@ -130,14 +165,8 @@ if command_exists supervisorctl; then
 else
     # Fallback: restart queues via artisan
     log "Supervisor not available, using artisan queue:restart..."
-    php artisan queue:restart
+    sudo -u www-data php artisan queue:restart
 fi
-
-# Set proper file permissions
-log "Setting proper file permissions..."
-sudo chown -R $USER:$USER $PROJECT_ROOT
-sudo chmod -R 775 $PROJECT_ROOT/storage
-sudo chmod -R 775 $PROJECT_ROOT/bootstrap/cache
 
 # Restart PHP-FPM and Nginx
 log "Restarting PHP-FPM and Nginx..."
@@ -146,11 +175,11 @@ sudo systemctl restart nginx
 
 # Optional: Clear opcache if enabled
 log "Clearing OPcache..."
-php artisan optimize:clear
+sudo -u www-data php artisan optimize:clear
 
 # Bring application back up
 log "Bringing application back online..."
-php artisan up
+sudo -u www-data php artisan up
 
 # Final status check
 log "Deployment completed successfully!"
@@ -158,26 +187,23 @@ log "Checking supervisor status..."
 check_supervisor
 
 log "Checking application status..."
-curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" http://localhost || log "Could not check application status"
+curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" https://fairtradeapi.jawbonetechnology.co.ke || log "Could not check application status"
 
 # Show application info
 log "Application information:"
-php artisan about
+sudo -u www-data php artisan about
 
 echo "======================================"
 echo "Deployment Summary"
 echo "======================================"
 echo "✓ Git pull completed"
 echo "✓ Dependencies updated" 
+echo "✓ Permissions fixed"
 echo "✓ Database migrations run"
 echo "✓ Caches cleared and rebuilt"
 echo "✓ Queue workers restarted"
-echo "✓ File permissions set"
 echo "✓ Services restarted"
 echo "✓ Application online"
 echo "======================================"
 echo "Deployment completed at: $(date)"
 echo "======================================"
-
-# Make the script executable
-# chmod +x deploy.sh
