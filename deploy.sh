@@ -10,7 +10,6 @@ set -e  # Exit on any error
 PROJECT_ROOT="/var/www/html/fairtrade-loans-backend"
 BRANCH="${1:-main}"
 USER="deploy"
-ENV_FILE="$PROJECT_ROOT/.env"
 
 echo "======================================"
 echo "Laravel Deployment Script"
@@ -62,11 +61,6 @@ fix_permissions() {
     sudo chmod -R 775 $PROJECT_ROOT/storage/framework/sessions/
     sudo chmod -R 775 $PROJECT_ROOT/storage/logs/
     
-    # Create necessary directories if they don't exist
-    sudo -u www-data mkdir -p $PROJECT_ROOT/storage/framework/views
-    sudo -u www-data mkdir -p $PROJECT_ROOT/storage/framework/cache
-    sudo -u www-data mkdir -p $PROJECT_ROOT/storage/framework/sessions
-    
     log "Permissions fixed successfully"
 }
 
@@ -80,20 +74,17 @@ if [ ! -f "artisan" ]; then
     exit 1
 fi
 
-# Check if .env file exists
-if [ ! -f "$ENV_FILE" ]; then
-    log "ERROR: .env file not found!"
-    exit 1
-fi
+# Fix permissions FIRST before any operations
+fix_permissions
 
 # Put application in maintenance mode
 log "Putting application in maintenance mode..."
-sudo -u www-data php artisan down --render="errors::503" --retry=60
+php artisan down --render="errors::503" --retry=60
 
 # Function to bring application back up on error
 cleanup() {
     log "ERROR occurred. Bringing application back up..."
-    sudo -u www-data php artisan up
+    php artisan up
     exit 1
 }
 
@@ -102,48 +93,48 @@ trap cleanup ERR
 
 # Git operations
 log "Fetching latest changes from git..."
-sudo -u www-data git fetch origin
+git fetch origin
 
 log "Checking out branch: $BRANCH"
-sudo -u www-data git checkout $BRANCH
+git checkout $BRANCH
 
 log "Pulling latest changes..."
-sudo -u www-data git pull origin $BRANCH
+git pull origin $BRANCH
 
 # Show current commit
-log "Current commit: $(sudo -u www-data git rev-parse --short HEAD) - $(sudo -u www-data git log -1 --pretty=%s)"
+log "Current commit: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%s)"
 
 # Install/Update PHP dependencies
 log "Installing/updating PHP dependencies..."
-sudo -u www-data composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
 
 # Fix permissions after composer install
 fix_permissions
 
 # Clear application caches
 log "Clearing application caches..."
-sudo -u www-data php artisan config:clear
-sudo -u www-data php artisan cache:clear
-sudo -u www-data php artisan route:clear
-sudo -u www-data php artisan view:clear
+php artisan config:clear
+php artisan cache:clear
+php artisan route:clear
+php artisan view:clear
 
 # Cache configuration for production
 log "Caching configuration for better performance..."
-sudo -u www-data php artisan config:cache
-sudo -u www-data php artisan route:cache
-sudo -u www-data php artisan view:cache
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache
 
 # Run database migrations (if any)
 log "Running database migrations..."
-sudo -u www-data php artisan migrate --force
+php artisan migrate --force
 
 # Optional: Run database seeder (uncomment if needed)
 # log "Running database seeder..."
-# sudo -u www-data php artisan db:seed --force
+# php artisan db:seed --force
 
 # Clear and cache events & routes again after migrations
 log "Refreshing cached files..."
-sudo -u www-data php artisan event:cache
+php artisan event:cache
 
 # Fix permissions again after all operations
 fix_permissions
@@ -165,7 +156,7 @@ if command_exists supervisorctl; then
 else
     # Fallback: restart queues via artisan
     log "Supervisor not available, using artisan queue:restart..."
-    sudo -u www-data php artisan queue:restart
+    php artisan queue:restart
 fi
 
 # Restart PHP-FPM and Nginx
@@ -175,11 +166,11 @@ sudo systemctl restart nginx
 
 # Optional: Clear opcache if enabled
 log "Clearing OPcache..."
-sudo -u www-data php artisan optimize:clear
+php artisan optimize:clear
 
 # Bring application back up
 log "Bringing application back online..."
-sudo -u www-data php artisan up
+php artisan up
 
 # Final status check
 log "Deployment completed successfully!"
@@ -191,7 +182,7 @@ curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" https://fairtradeapi.jawbo
 
 # Show application info
 log "Application information:"
-sudo -u www-data php artisan about
+php artisan about
 
 echo "======================================"
 echo "Deployment Summary"
