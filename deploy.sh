@@ -40,9 +40,15 @@ check_supervisor() {
     fi
 }
 
-# Function to fix permissions
-fix_permissions() {
-    log "Setting proper file permissions..."
+# Function to setup git safe directory
+setup_git_safe_directory() {
+    log "Setting up Git safe directory..."
+    git config --global --add safe.directory $PROJECT_ROOT
+}
+
+# Function to fix permissions for web server
+fix_web_permissions() {
+    log "Setting proper file permissions for web server..."
     
     # Set ownership to www-data for secure file operations
     sudo chown -R www-data:www-data $PROJECT_ROOT
@@ -55,13 +61,21 @@ fix_permissions() {
     sudo chmod -R 775 $PROJECT_ROOT/storage/
     sudo chmod -R 775 $PROJECT_ROOT/bootstrap/cache/
     
-    # Ensure specific directories have proper permissions
-    sudo chmod -R 775 $PROJECT_ROOT/storage/framework/views/
-    sudo chmod -R 775 $PROJECT_ROOT/storage/framework/cache/
-    sudo chmod -R 775 $PROJECT_ROOT/storage/framework/sessions/
-    sudo chmod -R 775 $PROJECT_ROOT/storage/logs/
+    log "Web permissions fixed successfully"
+}
+
+# Function to fix permissions for git operations
+fix_git_permissions() {
+    log "Setting permissions for Git operations..."
     
-    log "Permissions fixed successfully"
+    # Temporarily set ownership to deploy user for git operations
+    sudo chown -R $USER:$USER $PROJECT_ROOT
+    
+    # Ensure git can work with the files
+    sudo chmod -R 755 $PROJECT_ROOT
+    sudo chmod -R 775 $PROJECT_ROOT/.git
+    
+    log "Git permissions fixed successfully"
 }
 
 # Change to project directory
@@ -74,8 +88,11 @@ if [ ! -f "artisan" ]; then
     exit 1
 fi
 
-# Fix permissions FIRST before any operations
-fix_permissions
+# Setup git safe directory first
+setup_git_safe_directory
+
+# Fix permissions for git operations
+fix_git_permissions
 
 # Put application in maintenance mode
 log "Putting application in maintenance mode..."
@@ -104,12 +121,12 @@ git pull origin $BRANCH
 # Show current commit
 log "Current commit: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%s)"
 
+# Fix permissions for web server before composer install
+fix_web_permissions
+
 # Install/Update PHP dependencies
 log "Installing/updating PHP dependencies..."
 composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
-
-# Fix permissions after composer install
-fix_permissions
 
 # Clear application caches
 log "Clearing application caches..."
@@ -135,9 +152,6 @@ php artisan migrate --force
 # Clear and cache events & routes again after migrations
 log "Refreshing cached files..."
 php artisan event:cache
-
-# Fix permissions again after all operations
-fix_permissions
 
 # Restart queue workers via supervisor
 log "Restarting queue workers..."
