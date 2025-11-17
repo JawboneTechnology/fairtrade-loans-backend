@@ -140,6 +140,13 @@ git pull origin $BRANCH
 #     fi
 # fi
 
+# Set proper permissions for Composer FIRST (before running composer install)
+log "Setting permissions for Composer operations..."
+sudo chown -R $USER:$USER $PROJECT_ROOT/vendor/
+sudo chown -R $USER:$USER $PROJECT_ROOT/composer.json
+sudo chown -R $USER:$USER $PROJECT_ROOT/composer.lock
+sudo chmod -R 755 $PROJECT_ROOT/vendor/
+
 # Show current commit
 log "Current commit: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%s)"
 
