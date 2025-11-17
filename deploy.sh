@@ -140,8 +140,8 @@ git pull origin $BRANCH
 #     fi
 # fi
 
-# Set proper permissions for Composer FIRST (before running composer install)
-log "Setting permissions for Composer operations..."
+# FIX: Ensure vendor directory is writable by deploy user for Composer
+log "Setting vendor directory permissions for Composer..."
 sudo chown -R $USER:$USER $PROJECT_ROOT/vendor/
 sudo chown -R $USER:$USER $PROJECT_ROOT/composer.json
 sudo chown -R $USER:$USER $PROJECT_ROOT/composer.lock
