@@ -60,7 +60,8 @@ class SMSService
                 'from' => $senderId,
             ]);
 
-            Log::info("Africa's Talking SMS Response", ['response' => $result]);
+            Log::info("=== AFRICA'S TALKING SMS RESPONSE ===");
+            Log::info(PHP_EOL . json_encode(['response' => $result], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
             $status = 'failed';
             $providerResponse = $this->normalizeProviderResponse($result);
@@ -74,18 +75,20 @@ class SMSService
                 $status = strcasecmp($recipientStatus ?? '', 'Success') === 0 ? 'sent' : 'failed';
 
                 if ($status === 'failed') {
-                    Log::warning('SMS delivery failed', [
+                    Log::warning('=== SMS DELIVERY FAILED ===');
+                    Log::warning(PHP_EOL . json_encode([
                         'recipient' => $formattedRecipient,
                         'status' => $recipientStatus,
                         'status_code' => data_get($firstRecipient, 'statusCode')
-                    ]);
+                    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
                 }
             } else {
-                Log::warning('SMS API returned non-success status', [
+                Log::warning('=== SMS API RETURNED NON-SUCCESS STATUS ===');
+                Log::warning(PHP_EOL . json_encode([
                     'recipient' => $formattedRecipient,
                     'delivery_status' => $deliveryStatus,
                     'response' => $providerResponse,
-                ]);
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
             }
 
         } catch (\Exception $e) {
@@ -95,9 +98,9 @@ class SMSService
                 'message' => $e->getMessage(),
                 'exception' => get_class($e),
             ];
-            Log::error('SMS sending failed: ' . $e->getMessage(), [
-                'recipient' => $recipient,
-            ]);
+            Log::error('=== SMS SENDING FAILED ===');
+            Log::error('Error: ' . $e->getMessage());
+            Log::error(PHP_EOL . json_encode(['recipient' => $recipient], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         }
 
         return SmsMessage::create([

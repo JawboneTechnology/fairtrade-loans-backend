@@ -187,23 +187,28 @@ class AuthService
             $resetData = PasswordReset::where("email", $user->email)->first();
 
             if (!$resetData) {
-                Log::error("No reset code found for email: " . $user->email);
+                Log::error("=== NO RESET CODE FOUND ===");
+                Log::error("Email: " . $user->email);
                 throw new \Exception("No reset code found for this email.");
             }
 
             if ($resetData->reset_code !== (string) $code) {
-                Log::error("Incorrect reset code provided for email: " . $user->email);
+                Log::error("=== INCORRECT RESET CODE PROVIDED ===");
+                Log::error("Email: " . $user->email);
                 throw new \Exception("The reset code is incorrect.");
             }
 
             if ($resetData->expires_at < now()) {
-                Log::error("Expired reset code provided for email: " . $user->email);
+                Log::error("=== EXPIRED RESET CODE PROVIDED ===");
+                Log::error("Email: " . $user->email);
                 throw new \Exception("The reset code has expired.");
             }
 
             return true;
         } catch (\Exception $e) {
-            Log::error("Error verifying reset code: " . $e->getMessage());
+            Log::error("=== ERROR VERIFYING RESET CODE ===");
+            Log::error("Error: " . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
             throw $e;
         }
     }

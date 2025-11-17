@@ -71,7 +71,9 @@ class MpesaController extends Controller
                 return response()->json($result, 500);
             }
         } catch (\Exception $e) {
-            Log::error('Loan payment initiation error: ' . $e->getMessage());
+            Log::error('=== LOAN PAYMENT INITIATION ERROR ===');
+            Log::error('Error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
             
             return response()->json([
                 'success' => false,
@@ -119,12 +121,14 @@ class MpesaController extends Controller
     {
         $callbackData = $request->all();
         
-        Log::info('STK Push Callback received:', $callbackData);
+        Log::info('=== STK PUSH CALLBACK RECEIVED ===');
+        Log::info(PHP_EOL . json_encode($callbackData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         try {
             $this->mpesaService->processStkCallback($callbackData);
         } catch (\Exception $e) {
             Log::error('Error processing STK callback: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
         }
 
         // Always return success to M-Pesa
@@ -136,7 +140,8 @@ class MpesaController extends Controller
      */
     public function c2bValidation(Request $request): JsonResponse
     {
-        Log::info('C2B Validation received:', $request->all());
+        Log::info('=== C2B VALIDATION RECEIVED ===');
+        Log::info(PHP_EOL . json_encode($request->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         try {
             $billRefNumber = $request->input('BillRefNumber');
@@ -146,22 +151,24 @@ class MpesaController extends Controller
             $validation = $this->mpesaService->validatePaybillPayment($billRefNumber, $amount);
             
             if ($validation['valid']) {
-                Log::info('C2B Validation successful', [
+                Log::info('=== C2B VALIDATION SUCCESSFUL ===');
+                Log::info(PHP_EOL . json_encode([
                     'bill_ref' => $billRefNumber,
                     'amount' => $amount,
                     'loan_id' => $validation['loan_id'] ?? null
-                ]);
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
                 
                 return response()->json([
                     "ResultCode" => "0",
                     "ResultDesc" => "Accepted",
                 ]);
             } else {
-                Log::warning('C2B Validation failed', [
+                Log::warning('=== C2B VALIDATION FAILED ===');
+                Log::warning(PHP_EOL . json_encode([
                     'bill_ref' => $billRefNumber,
                     'amount' => $amount,
                     'reason' => $validation['reason']
-                ]);
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
                 
                 return response()->json([
                     "ResultCode" => "C2B00014", // Invalid KYC Details
@@ -169,7 +176,9 @@ class MpesaController extends Controller
                 ]);
             }
         } catch (\Exception $e) {
-            Log::error('C2B Validation error: ' . $e->getMessage());
+            Log::error('=== C2B VALIDATION ERROR ===');
+            Log::error('Error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
             
             return response()->json([
                 'ResultCode' => "C2B00016", // Other errors
@@ -185,24 +194,27 @@ class MpesaController extends Controller
     {
         $callbackData = $request->all();
         
-        Log::info('C2B Confirmation received:', $callbackData);
+        Log::info('=== C2B CONFIRMATION RECEIVED ===');
+        Log::info(PHP_EOL . json_encode($callbackData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         try {
             // Process paybill payment with loan identification
             $result = $this->mpesaService->processPaybillPayment($callbackData);
             
             if ($result['success']) {
-                Log::info('C2B Payment processed successfully', [
+                Log::info('=== C2B PAYMENT PROCESSED SUCCESSFULLY ===');
+                Log::info(PHP_EOL . json_encode([
                     'transaction_id' => $result['transaction_id'] ?? null,
                     'loan_id' => $result['loan_id'] ?? null
-                ]);
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
             } else {
-                Log::error('C2B Payment processing failed', [
-                    'reason' => $result['message'] ?? 'Unknown error'
-                ]);
+                Log::error('=== C2B PAYMENT PROCESSING FAILED ===');
+                Log::error('Reason: ' . ($result['message'] ?? 'Unknown error'));
             }
         } catch (\Exception $e) {
-            Log::error('Error processing C2B confirmation: ' . $e->getMessage());
+            Log::error('=== ERROR PROCESSING C2B CONFIRMATION ===');
+            Log::error('Error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
         }
 
         return response()->json([
@@ -216,13 +228,16 @@ class MpesaController extends Controller
      */
     public function b2cResult(Request $request): JsonResponse
     {
-        Log::info('B2C Result received:', $request->all());
+        Log::info('=== B2C RESULT RECEIVED ===');
+        Log::info(PHP_EOL . json_encode($request->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         // Process B2C result
         try {
             $this->processB2CResult($request->all());
         } catch (\Exception $e) {
-            Log::error('Error processing B2C result: ' . $e->getMessage());
+            Log::error('=== ERROR PROCESSING B2C RESULT ===');
+            Log::error('Error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
         }
 
         return response()->json([
@@ -236,7 +251,8 @@ class MpesaController extends Controller
      */
     public function b2cTimeout(Request $request): JsonResponse
     {
-        Log::info('B2C Timeout received:', $request->all());
+        Log::info('=== B2C TIMEOUT RECEIVED ===');
+        Log::info(PHP_EOL . json_encode($request->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         return response()->json([
             'ResultCode' => 0,
@@ -249,7 +265,8 @@ class MpesaController extends Controller
      */
     public function statusResult(Request $request): JsonResponse
     {
-        Log::info('Transaction Status Result received:', $request->all());
+        Log::info('=== TRANSACTION STATUS RESULT RECEIVED ===');
+        Log::info(PHP_EOL . json_encode($request->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         return response()->json([
             'ResultCode' => 0,
@@ -262,7 +279,8 @@ class MpesaController extends Controller
      */
     public function statusTimeout(Request $request): JsonResponse
     {
-        Log::info('Transaction Status Timeout received:', $request->all());
+        Log::info('=== TRANSACTION STATUS TIMEOUT RECEIVED ===');
+        Log::info(PHP_EOL . json_encode($request->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         return response()->json([
             'ResultCode' => 0,
@@ -275,7 +293,8 @@ class MpesaController extends Controller
      */
     public function balanceResult(Request $request): JsonResponse
     {
-        Log::info('Balance Result received:', $request->all());
+        Log::info('=== BALANCE RESULT RECEIVED ===');
+        Log::info(PHP_EOL . json_encode($request->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         return response()->json([
             'ResultCode' => 0,
@@ -288,7 +307,8 @@ class MpesaController extends Controller
      */
     public function balanceTimeout(Request $request): JsonResponse
     {
-        Log::info('Balance Timeout received:', $request->all());
+        Log::info('=== BALANCE TIMEOUT RECEIVED ===');
+        Log::info(PHP_EOL . json_encode($request->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         return response()->json([
             'ResultCode' => 0,
@@ -301,7 +321,8 @@ class MpesaController extends Controller
      */
     public function reversalResult(Request $request): JsonResponse
     {
-        Log::info('Reversal Result received:', $request->all());
+        Log::info('=== REVERSAL RESULT RECEIVED ===');
+        Log::info(PHP_EOL . json_encode($request->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         return response()->json([
             'ResultCode' => 0,
@@ -314,7 +335,8 @@ class MpesaController extends Controller
      */
     public function reversalTimeout(Request $request): JsonResponse
     {
-        Log::info('Reversal Timeout received:', $request->all());
+        Log::info('=== REVERSAL TIMEOUT RECEIVED ===');
+        Log::info(PHP_EOL . json_encode($request->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         return response()->json([
             'ResultCode' => 0,
@@ -327,7 +349,8 @@ class MpesaController extends Controller
      */
     public function b2bResult(Request $request): JsonResponse
     {
-        Log::info('B2B Result received:', $request->all());
+        Log::info('=== B2B RESULT RECEIVED ===');
+        Log::info(PHP_EOL . json_encode($request->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         return response()->json([
             'ResultCode' => 0,
@@ -340,7 +363,8 @@ class MpesaController extends Controller
      */
     public function b2bTimeout(Request $request): JsonResponse
     {
-        Log::info('B2B Timeout received:', $request->all());
+        Log::info('=== B2B TIMEOUT RECEIVED ===');
+        Log::info(PHP_EOL . json_encode($request->all(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         return response()->json([
             'ResultCode' => 0,
@@ -366,7 +390,9 @@ class MpesaController extends Controller
             ]);
             
         } catch (\Exception $e) {
-            Log::error('Error fetching user transactions: ' . $e->getMessage());
+            Log::error('=== ERROR FETCHING USER TRANSACTIONS ===');
+            Log::error('Error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
             
             return response()->json([
                 'success' => false,
@@ -391,7 +417,9 @@ class MpesaController extends Controller
             return response()->json($result);
             
         } catch (\Exception $e) {
-            Log::error('Error querying transaction status: ' . $e->getMessage());
+            Log::error('=== ERROR QUERYING TRANSACTION STATUS ===');
+            Log::error('Error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
             
             return response()->json([
                 'success' => false,
@@ -427,7 +455,9 @@ class MpesaController extends Controller
             }
             
         } catch (\Exception $e) {
-            Log::error('Error getting loan payment info: ' . $e->getMessage());
+            Log::error('=== ERROR GETTING LOAN PAYMENT INFO ===');
+            Log::error('Error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
             
             return response()->json([
                 'success' => false,
@@ -496,7 +526,9 @@ class MpesaController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Error testing payment notification: ' . $e->getMessage());
+            Log::error('=== ERROR TESTING PAYMENT NOTIFICATION ===');
+            Log::error('Error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
             
             return response()->json([
                 'success' => false,
@@ -571,7 +603,8 @@ class MpesaController extends Controller
                 $user->notify(new DisbursementInitiatedNotification($applicantName, (float)$amount, $loan ?? null, $result['data'] ?? null));
             } catch (\Exception $e) {
                 // Log but do not fail the request
-                \Illuminate\Support\Facades\Log::error('Failed to queue disbursement email', ['error' => $e->getMessage()]);
+                Log::error('=== FAILED TO QUEUE DISBURSEMENT EMAIL ===');
+                Log::error('Error: ' . $e->getMessage());
             }
 
             // Send SMS informing the user that the disbursement has been initiated
@@ -579,13 +612,16 @@ class MpesaController extends Controller
                 $smsMessage = "Dear {$applicantName}, a disbursement of KES " . number_format($amount, 2) . " has been initiated to your mobile number. We will notify you when the payment is completed.";
                 $smsService->sendSMS($phone, $smsMessage, $user->id ?? null);
             } catch (\Exception $e) {
-                \Illuminate\Support\Facades\Log::error('Failed to send disbursement SMS', ['error' => $e->getMessage()]);
+                Log::error('=== FAILED TO SEND DISBURSEMENT SMS ===');
+                Log::error('Error: ' . $e->getMessage());
             }
 
             return response()->json($result);
 
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error('Error initiating B2C disbursement: ' . $e->getMessage());
+            Log::error('=== ERROR INITIATING B2C DISBURSEMENT ===');
+            Log::error('Error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
 
             return response()->json([
                 'success' => false,

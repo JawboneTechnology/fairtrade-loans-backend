@@ -12,8 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('mpesa_transactions', function (Blueprint $table) {
-            $table->id();
-            $table->uuid('transaction_id')->unique();
+            $table->uuid('transaction_id')->primary();
             $table->string('checkout_request_id')->nullable();
             $table->string('merchant_request_id')->nullable();
             $table->string('mpesa_receipt_number')->nullable();

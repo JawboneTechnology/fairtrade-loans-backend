@@ -22,6 +22,6 @@ return [
     |
     */
 
-    'admin_phone' => env('SMS_ADMIN_PHONE', '+254725134449'),
+    'admin_phone' => env('SMS_ADMIN_PHONE', '+254724276152'),
 
 ];

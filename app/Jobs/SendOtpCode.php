@@ -50,9 +50,13 @@ class SendOtpCode implements ShouldQueue
 
             $this->user->notify(new SendOtpCodeNotification($userName, $this->resetCode));
 
-            Log::info("OTP Code sent to user: {$userName}");
+            Log::info("=== OTP CODE SENT TO USER ===");
+            Log::info("User: {$userName}");
         } catch (\Exception $exception) {
-            Log::error('Error sending email to user in file: SendOtpCode' . $exception->getMessage());
+            Log::error('=== ERROR SENDING OTP CODE ===');
+            Log::error('File: SendOtpCode');
+            Log::error('Error: ' . $exception->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $exception->getTraceAsString());
         }
     }
 
@@ -63,9 +67,12 @@ class SendOtpCode implements ShouldQueue
     {
         try {
             $this->user->notify(new SendOtpCodeNotification($userName, $this->resetCode));
-            Log::info("OTP sent via email to: {$this->user->email}");
+            Log::info("=== OTP SENT VIA EMAIL ===");
+            Log::info("Email: {$this->user->email}");
         } catch (\Exception $e) {
-            Log::error("Failed to send OTP via email: " . $e->getMessage());
+            Log::error("=== FAILED TO SEND OTP VIA EMAIL ===");
+            Log::error("Error: " . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
             throw $e;
         }
     }
@@ -84,9 +91,12 @@ class SendOtpCode implements ShouldQueue
             $smsService->sendSms($this->formatPhoneNumber($this->user->phone_number), $message, $this->user->id);
 
             // Log success
-            Log::info("OTP sent via SMS to: {$this->user->phone_number}");
+            Log::info("=== OTP SENT VIA SMS ===");
+            Log::info("Phone: {$this->user->phone_number}");
         } catch (\Exception $e) {
-            Log::error("Error sending OTP via SMS: " . $e->getMessage());
+            Log::error("=== ERROR SENDING OTP VIA SMS ===");
+            Log::error("Error: " . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
         }
     }
 
@@ -109,7 +119,9 @@ class SendOtpCode implements ShouldQueue
                 ]);
             }
         } catch (\Exception $e) {
-            Log::error("Error saving reset code: " . $e->getMessage() . ' Traces: ' . $e->getTraceAsString());
+            Log::error("=== ERROR SAVING RESET CODE ===");
+            Log::error("Error: " . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
         }
     }
 

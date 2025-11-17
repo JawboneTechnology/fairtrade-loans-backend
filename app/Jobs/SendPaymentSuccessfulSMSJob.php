@@ -64,12 +64,13 @@ class SendPaymentSuccessfulSMSJob implements ShouldQueue
             $user = User::find($this->userId);
 
             if (!$transaction || !$loan || !$user) {
-                Log::warning('Missing data for SMS job', [
+                Log::warning('=== MISSING DATA FOR SMS JOB ===');
+                Log::warning(PHP_EOL . json_encode([
                     'transaction_found' => $transaction ? true : false,
                     'loan_found'        => $loan ? true : false,
                     'user_found'        => $user ? true : false,
                     'transaction_id'    => $this->transactionId
-                ]);
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
                 return;
             }
 
@@ -85,20 +86,23 @@ class SendPaymentSuccessfulSMSJob implements ShouldQueue
             // Send SMS
             $smsService->sendSMS($phoneNumber, $message);
 
-            Log::info('Payment success SMS sent via job', [
+            Log::info('=== PAYMENT SUCCESS SMS SENT VIA JOB ===');
+            Log::info(PHP_EOL . json_encode([
                 'user_id'        => $user->id,
                 'transaction_id' => $transaction->transaction_id,
                 'phone_number'   => $phoneNumber,
                 'loan_number'    => $loan->loan_number
-            ]);
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         } catch (\Exception $e) {
-            Log::error('SMS job failed', [
+            Log::error('=== SMS JOB FAILED ===');
+            Log::error(PHP_EOL . json_encode([
                 'transaction_id' => $this->transactionId,
                 'user_id'        => $this->userId,
                 'error'          => $e->getMessage(),
                 'attempt'        => $this->attempts()
-            ]);
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
 
             // Re-throw to trigger retry mechanism
             throw $e;
@@ -129,12 +133,13 @@ class SendPaymentSuccessfulSMSJob implements ShouldQueue
      */
     public function failed(\Throwable $exception): void
     {
-        Log::error('SMS job failed permanently', [
+        Log::error('=== SMS JOB FAILED PERMANENTLY ===');
+        Log::error(PHP_EOL . json_encode([
             'transaction_id' => $this->transactionId,
             'user_id'        => $this->userId,
             'loan_id'        => $this->loanId,
             'error'          => $exception->getMessage(),
             'attempts'       => $this->attempts()
-        ]);
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
     }
 }

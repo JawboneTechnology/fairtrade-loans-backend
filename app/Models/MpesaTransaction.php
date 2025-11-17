@@ -8,8 +8,28 @@ use Illuminate\Support\Str;
 
 class MpesaTransaction extends Model
 {
+    /**
+     * The primary key for the model.
+     *
+     * @var string
+     */
+    protected $primaryKey = 'transaction_id';
+
+    /**
+     * The "type" of the primary key ID.
+     *
+     * @var string
+     */
+    protected $keyType = 'string';
+
+    /**
+     * Indicates if the IDs are auto-incrementing.
+     *
+     * @var bool
+     */
+    public $incrementing = false;
+
     protected $fillable = [
-        'transaction_id',
         'checkout_request_id',
         'merchant_request_id',
         'mpesa_receipt_number',

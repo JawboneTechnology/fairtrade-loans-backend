@@ -33,21 +33,30 @@ class ProcessStkPushJob implements ShouldQueue
     public function handle()
     {
         // Call M-Pesa STK Push API
-        $response = Mpesa::stkPush([
-            'amount' => $this->amount,
-            'phone' => $this->phoneNumber,
-            'reference' => $this->accountReference,
-            'description' => $this->transactionDescription,
-            'callback' => route('mpesa.stk-callback'), // Define your callback route
-        ]);
+        // Method signature: stkpush($phonenumber, $amount, $account_number, $callbackurl = null)
+        $response = Mpesa::stkpush(
+            $this->phoneNumber,
+            $this->amount,
+            $this->accountReference,
+            route('mpesa.stk-callback')
+        );
 
-        // Log the response or handle as needed
-        log::info('STK Push Response:', [
+        // Convert response to array for logging
+        $responseData = [];
+        if (method_exists($response, 'json')) {
+            $responseData = $response->json();
+        } elseif (method_exists($response, 'body')) {
+            $responseData = json_decode($response->body(), true) ?? [];
+        }
+
+        // Log the response
+        Log::info('=== STK PUSH JOB RESPONSE ===');
+        Log::info(PHP_EOL . json_encode([
             'amount' => $this->amount,
             'phone' => $this->phoneNumber,
             'reference' => $this->accountReference,
-            'description' => $this->transactionDescription,
-            'callback' => route('mpesa.stk-callback'), // Define your callback route
-        ]);
+            'response' => $responseData,
+            'status' => method_exists($response, 'status') ? $response->status() : 'unknown'
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
     }
 }

@@ -71,6 +71,13 @@ Route::prefix('v1')->group(function () {
         // M-Pesa test routes (for debugging - remove in production)
         Route::get('test-token', [MpesaTestController::class, 'testAccessToken']);
         Route::get('test-c2b', [MpesaTestController::class, 'testC2BRegistration']);
+        Route::post('test-stk-push', [MpesaTestController::class, 'testStkPush']);
+        Route::post('test-b2c', [MpesaTestController::class, 'testB2C']);
+        Route::post('test-c2b-validation', [MpesaTestController::class, 'testC2BValidation']);
+        Route::post('test-c2b-confirmation', [MpesaTestController::class, 'testC2BConfirmation']);
+        Route::post('test-b2c-result', [MpesaTestController::class, 'testB2CResult']);
+        Route::post('test-b2c-timeout', [MpesaTestController::class, 'testB2CTimeout']);
+        Route::get('test-transactions', [MpesaTestController::class, 'getTestTransactions']);
         
         // STK Push callbacks
         Route::post('stk/callback', [MpesaController::class, 'stkCallback'])->name('mpesa.stk-callback');

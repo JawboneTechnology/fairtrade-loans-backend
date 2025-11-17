@@ -59,8 +59,10 @@ class NotifyGuarantorOfloanRequest implements ShouldQueue
         $loanName = $loanType->name;
         $notificationId = $this->notificationId;
 
-        Log::info("Sending loan request notification to guarantor: {$this->loan}");
-        Log::info('Notification created with ID', ['id' => $notificationId]);
+        Log::info("=== SENDING LOAN REQUEST NOTIFICATION TO GUARANTOR ===");
+        Log::info("Loan: {$this->loan}");
+        Log::info('=== NOTIFICATION CREATED ===');
+        Log::info("ID: {$notificationId}");
 
         // Send request to guarantor
         $this->guarantor->notify(new GuarantorLoanRequestNotification(
