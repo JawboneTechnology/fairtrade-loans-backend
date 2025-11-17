@@ -115,8 +115,30 @@ git fetch origin
 log "Checking out branch: $BRANCH"
 git checkout $BRANCH
 
+log "Checking for local changes..."
+if ! git diff-index --quiet HEAD --; then
+    log "Stashing local changes..."
+    git stash push -m "Auto-stashed by deployment script $(date +'%Y-%m-%d %H:%M:%S')"
+    STASH_APPLIED=true
+    log "Local changes stashed successfully"
+else
+    STASH_APPLIED=false
+    log "No local changes to stash"
+fi
+
 log "Pulling latest changes..."
 git pull origin $BRANCH
+
+# Apply stashed changes back if there were any
+# if [ "$STASH_APPLIED" = true ]; then
+#     log "Applying stashed changes..."
+#     if git stash pop; then
+#         log "Stashed changes applied successfully"
+#     else
+#         log "Warning: There were conflicts when applying stashed changes. Resolve manually."
+#         log "Stashed changes preserved. Use 'git stash list' to see them and 'git stash pop' to apply."
+#     fi
+# fi
 
 # Show current commit
 log "Current commit: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%s)"
