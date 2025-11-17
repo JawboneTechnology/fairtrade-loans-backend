@@ -61,6 +61,10 @@ fix_web_permissions() {
     sudo chmod -R 775 $PROJECT_ROOT/storage/
     sudo chmod -R 775 $PROJECT_ROOT/bootstrap/cache/
     
+    # IMPORTANT: Keep vendor directory owned by deploy for Composer operations
+    sudo chown -R $USER:$USER $PROJECT_ROOT/vendor/
+    sudo chmod -R 755 $PROJECT_ROOT/vendor/
+    
     log "Web permissions fixed successfully"
 }
 
@@ -129,33 +133,23 @@ fi
 log "Pulling latest changes..."
 git pull origin $BRANCH
 
-# Apply stashed changes back if there were any
-# if [ "$STASH_APPLIED" = true ]; then
-#     log "Applying stashed changes..."
-#     if git stash pop; then
-#         log "Stashed changes applied successfully"
-#     else
-#         log "Warning: There were conflicts when applying stashed changes. Resolve manually."
-#         log "Stashed changes preserved. Use 'git stash list' to see them and 'git stash pop' to apply."
-#     fi
-# fi
+# Show current commit
+log "Current commit: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%s)"
 
-# FIX: Ensure vendor directory is writable by deploy user for Composer
+# FIX: Run Composer FIRST while we still have deploy permissions
 log "Setting vendor directory permissions for Composer..."
 sudo chown -R $USER:$USER $PROJECT_ROOT/vendor/
 sudo chown -R $USER:$USER $PROJECT_ROOT/composer.json
 sudo chown -R $USER:$USER $PROJECT_ROOT/composer.lock
 sudo chmod -R 755 $PROJECT_ROOT/vendor/
 
-# Show current commit
-log "Current commit: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%s)"
-
-# Fix permissions for web server before composer install
-fix_web_permissions
-
-# Install/Update PHP dependencies
+# Install/Update PHP dependencies - RUN THIS BEFORE WEB PERMISSIONS
 log "Installing/updating PHP dependencies..."
 composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+
+# NOW set web permissions (this will preserve vendor for deploy)
+log "Setting web permissions after Composer..."
+fix_web_permissions
 
 # Clear application caches
 log "Clearing application caches..."
