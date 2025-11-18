@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Log;
 use Iankumu\Mpesa\Facades\Mpesa;
@@ -572,6 +573,140 @@ class MpesaTestController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Diagnostic endpoint to check callback URL configuration
+     * 
+     * This helps identify why STK Push callbacks aren't being received
+     * 
+     * Endpoint: GET /api/v1/mpesa/check-callback-config
+     */
+    public function checkCallbackConfig(): JsonResponse
+    {
+        try {
+            $appUrl = config('app.url');
+            $callbackRoute = route('mpesa.stk-callback');
+            $isLocalhost = in_array(parse_url($appUrl, PHP_URL_HOST), ['localhost', '127.0.0.1', '::1']);
+            $isHttps = parse_url($callbackRoute, PHP_URL_SCHEME) === 'https';
+            
+            // Check if callback URL is publicly accessible
+            $isPublic = !$isLocalhost;
+            
+            // Determine issues
+            $issues = [];
+            $warnings = [];
+            
+            if ($isLocalhost) {
+                $issues[] = "APP_URL is set to localhost - Safaricom CANNOT reach this URL";
+                $issues[] = "You need to use ngrok or deploy to a public server";
+            }
+            
+            if (!$isHttps && !$isLocalhost) {
+                $warnings[] = "Callback URL is HTTP - Production requires HTTPS";
+            }
+            
+            if (strpos($appUrl, 'ngrok') !== false) {
+                $warnings[] = "Using ngrok - Make sure ngrok is running and URL is current";
+            }
+            
+            // Test if route exists and is accessible
+            $routeExists = true;
+            try {
+                route('mpesa.stk-callback');
+            } catch (\Exception $e) {
+                $routeExists = false;
+                $issues[] = "Route 'mpesa.stk-callback' not found - Check routes/api.php";
+            }
+            
+            // Overall status
+            $status = empty($issues) ? 'READY' : 'NOT READY';
+            $canReceiveCallbacks = empty($issues);
+            
+            Log::info('=== CALLBACK CONFIGURATION CHECK ===');
+            Log::info(PHP_EOL . json_encode([
+                'app_url' => $appUrl,
+                'callback_url' => $callbackRoute,
+                'status' => $status,
+                'can_receive_callbacks' => $canReceiveCallbacks
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            
+            return response()->json([
+                'success' => true,
+                'status' => $status,
+                'can_receive_callbacks' => $canReceiveCallbacks,
+                'configuration' => [
+                    'app_url' => $appUrl,
+                    'callback_url' => $callbackRoute,
+                    'environment' => config('mpesa.environment'),
+                    'is_localhost' => $isLocalhost,
+                    'is_https' => $isHttps,
+                    'is_public' => $isPublic,
+                    'route_exists' => $routeExists
+                ],
+                'issues' => $issues,
+                'warnings' => $warnings,
+                'recommendations' => $this->getRecommendations($isLocalhost, $isHttps),
+                'next_steps' => $this->getNextSteps($issues)
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Error checking callback config: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to check configuration',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Get recommendations based on configuration
+     */
+    private function getRecommendations(bool $isLocalhost, bool $isHttps): array
+    {
+        $recommendations = [];
+        
+        if ($isLocalhost) {
+            $recommendations[] = "For local development: Install ngrok (brew install ngrok)";
+            $recommendations[] = "Run: ngrok http 8000";
+            $recommendations[] = "Update APP_URL in .env to the ngrok HTTPS URL";
+            $recommendations[] = "Run: php artisan config:clear";
+        } else {
+            $recommendations[] = "Your callback URL is publicly accessible ✓";
+            
+            if (!$isHttps) {
+                $recommendations[] = "For production: Configure SSL certificate";
+                $recommendations[] = "Use Let's Encrypt or Cloudflare SSL";
+            } else {
+                $recommendations[] = "HTTPS is configured ✓";
+            }
+        }
+        
+        return $recommendations;
+    }
+    
+    /**
+     * Get next steps based on issues found
+     */
+    private function getNextSteps(array $issues): array
+    {
+        if (empty($issues)) {
+            return [
+                "1. Your callback configuration looks good!",
+                "2. Initiate an STK Push",
+                "3. Monitor logs: tail -f storage/logs/laravel.log | grep 'STK PUSH CALLBACK'",
+                "4. You should see callback logs when user enters PIN"
+            ];
+        }
+        
+        return [
+            "1. Fix the issues listed above",
+            "2. Most common fix: Use ngrok for local development",
+            "3. See STK_CALLBACK_TROUBLESHOOTING.md for detailed instructions",
+            "4. After fixing, run this diagnostic again"
+        ];
     }
 
     /**

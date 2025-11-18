@@ -78,6 +78,7 @@ Route::prefix('v1')->group(function () {
         Route::post('test-b2c-result', [MpesaTestController::class, 'testB2CResult']);
         Route::post('test-b2c-timeout', [MpesaTestController::class, 'testB2CTimeout']);
         Route::get('test-transactions', [MpesaTestController::class, 'getTestTransactions']);
+        Route::get('check-callback-config', [MpesaTestController::class, 'checkCallbackConfig']);
         
         // STK Push callbacks
         Route::post('stk/callback', [MpesaController::class, 'stkCallback'])->name('mpesa.stk-callback');
