@@ -19,14 +19,15 @@ http://localhost:8000/api/v1/mpesa
 
 1. [Access Token Test](#1-access-token-test)
 2. [STK Push Test](#2-stk-push-test)
-3. [B2C Payment Test](#3-b2c-payment-test)
-4. [C2B Registration Test](#4-c2b-registration-test)
-5. [C2B Validation Test](#5-c2b-validation-test)
-6. [C2B Confirmation Test](#6-c2b-confirmation-test)
-7. [B2C Result Callback Test](#7-b2c-result-callback-test)
-8. [B2C Timeout Callback Test](#8-b2c-timeout-callback-test)
-9. [Get Test Transactions](#9-get-test-transactions)
-10. [Logging](#10-logging)
+3. [**Payment Verification (NEW)**](#3-payment-verification)
+4. [B2C Payment Test](#4-b2c-payment-test)
+5. [C2B Registration Test](#5-c2b-registration-test)
+6. [C2B Validation Test](#6-c2b-validation-test)
+7. [C2B Confirmation Test](#7-c2b-confirmation-test)
+8. [B2C Result Callback Test](#8-b2c-result-callback-test)
+9. [B2C Timeout Callback Test](#9-b2c-timeout-callback-test)
+10. [Get Test Transactions](#10-get-test-transactions)
+11. [Logging](#11-logging)
 
 ---
 
@@ -173,7 +174,185 @@ curl --location 'http://localhost:8000/api/v1/mpesa/test-stk-push' \
 
 ---
 
-## 3. B2C Payment Test
+## 3. Payment Verification
+
+**NEW ENDPOINT** - Verify if an STK Push payment was completed successfully. This endpoint checks the local database for payment status after the M-Pesa callback has been received.
+
+### Use Case
+After initiating an STK Push, use this endpoint to poll for payment confirmation. The frontend should check this endpoint every 3 seconds to verify if the user has completed the payment.
+
+### Endpoint
+```
+POST /api/v1/mpesa/verify-payment
+```
+
+### Authentication
+**Required**: Bearer Token (Sanctum authentication)
+
+### Headers
+```
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {your_token_here}
+```
+
+### Request Body
+```json
+{
+  "checkout_request_id": "ws_CO_17112025102245"
+}
+```
+
+### Field Descriptions
+- `checkout_request_id` (required): The checkout request ID received from the STK Push initiation response
+
+### Example Postman Request
+```bash
+curl --location 'http://localhost:8000/api/v1/mpesa/verify-payment' \
+--header 'Content-Type: application/json' \
+--header 'Accept: application/json' \
+--header 'Authorization: Bearer YOUR_TOKEN_HERE' \
+--data '{
+  "checkout_request_id": "ws_CO_17112025102245"
+}'
+```
+
+### Success Response - Payment Complete (200)
+```json
+{
+  "success": true,
+  "payment_complete": true,
+  "message": "Payment completed successfully",
+  "status": "SUCCESS",
+  "data": {
+    "transaction_id": "6704b991-3b9d-4ac4-8b54-b64ef5cc653e",
+    "amount_paid": 100.0,
+    "mpesa_receipt_number": "OEI2AK4Q16",
+    "transaction_date": "2025-11-17 10:30:45",
+    "phone_number": "254712345678",
+    "account_reference": "TEST-001",
+    "result_description": "The service request is processed successfully."
+  }
+}
+```
+
+### Success Response - Payment Pending (200)
+```json
+{
+  "success": true,
+  "payment_complete": false,
+  "message": "Payment is still pending. Please check your phone for M-Pesa prompt.",
+  "status": "PENDING",
+  "data": {
+    "transaction_id": "6704b991-3b9d-4ac4-8b54-b64ef5cc653e",
+    "amount": 100.0,
+    "phone_number": "254712345678",
+    "account_reference": "TEST-001"
+  }
+}
+```
+
+**Action**: Continue polling every 3 seconds. Maximum 20 attempts (60 seconds total).
+
+### Error Response - Payment Failed (400)
+```json
+{
+  "success": false,
+  "payment_complete": false,
+  "message": "Payment failed or was cancelled",
+  "status": "FAILED",
+  "data": {
+    "transaction_id": "6704b991-3b9d-4ac4-8b54-b64ef5cc653e",
+    "result_code": "1032",
+    "result_description": "Request cancelled by user",
+    "amount": 100.0
+  }
+}
+```
+
+**Common Failure Reasons**:
+- `1032`: User cancelled the request
+- `1`: Insufficient balance
+- `2001`: Wrong PIN entered
+
+### Error Response - Transaction Not Found (404)
+```json
+{
+  "success": false,
+  "payment_complete": false,
+  "message": "Transaction not found. Please try again.",
+  "status": "NOT_FOUND"
+}
+```
+
+### Error Response - Server Error (500)
+```json
+{
+  "success": false,
+  "payment_complete": false,
+  "message": "Error verifying payment status",
+  "status": "ERROR",
+  "error": "Database connection failed"
+}
+```
+
+### Complete Testing Flow
+
+**Step 1**: Initiate STK Push
+```bash
+POST /api/v1/mpesa/test-stk-push
+{
+  "phone_number": "254712345678",
+  "amount": 100,
+  "account_reference": "TEST-001"
+}
+```
+
+Save the `checkout_request_id` from the response.
+
+**Step 2**: User enters PIN on phone (wait 5-10 seconds)
+
+**Step 3**: Verify payment status
+```bash
+POST /api/v1/mpesa/verify-payment
+{
+  "checkout_request_id": "ws_CO_17112025102245"
+}
+```
+
+**Step 4**: Check the response
+- If `status: "SUCCESS"` → Payment complete! Show receipt.
+- If `status: "PENDING"` → Wait 3 seconds, retry (max 20 times).
+- If `status: "FAILED"` → Show error, allow user to retry.
+
+### Polling Best Practices
+```javascript
+// Recommended polling configuration
+const POLLING_CONFIG = {
+  interval: 3000,      // 3 seconds between checks
+  maxAttempts: 20,     // 60 seconds total
+  initialDelay: 2000   // Wait 2s after STK Push before first check
+};
+```
+
+### Logs Generated
+- PAYMENT VERIFICATION REQUESTED (with checkout_request_id)
+- PAYMENT VERIFICATION RESULT (with status and amount)
+- ERROR VERIFYING PAYMENT (if an error occurs)
+
+### Related Endpoints
+- **Initiate STK Push**: `POST /api/v1/mpesa/stk-push`
+- **Query Status (M-Pesa API)**: `POST /api/v1/mpesa/query-status`
+- **Get Transactions**: `GET /api/v1/mpesa/transactions`
+
+### Documentation
+For complete documentation including frontend implementation examples, see:
+- `PAYMENT_VERIFICATION_ENDPOINT.md` - Full documentation
+- `PAYMENT_VERIFICATION_QUICK_REFERENCE.md` - Quick reference card
+
+---
+
+## 4. B2C Payment Test
 
 Test Business to Customer (B2C) payments. This sends money from your business to a customer's M-Pesa account.
 
@@ -256,7 +435,7 @@ curl --location 'http://localhost:8000/api/v1/mpesa/test-b2c' \
 
 ---
 
-## 4. C2B Registration Test
+## 5. C2B Registration Test
 
 Test the registration of C2B validation and confirmation URLs with Safaricom.
 
@@ -314,7 +493,7 @@ curl --location 'http://localhost:8000/api/v1/mpesa/test-c2b' \
 
 ---
 
-## 5. C2B Validation Test
+## 6. C2B Validation Test
 
 Test the C2B validation callback. This simulates what Safaricom sends to your validation URL when a customer makes a paybill payment.
 
@@ -414,7 +593,7 @@ curl --location 'http://localhost:8000/api/v1/mpesa/test-c2b-validation' \
 
 ---
 
-## 6. C2B Confirmation Test
+## 7. C2B Confirmation Test
 
 Test the C2B confirmation callback. This simulates what Safaricom sends to your confirmation URL after a successful paybill payment.
 
@@ -493,7 +672,7 @@ curl --location 'http://localhost:8000/api/v1/mpesa/test-c2b-confirmation' \
 
 ---
 
-## 7. B2C Result Callback Test
+## 8. B2C Result Callback Test
 
 Test the B2C result callback. This simulates what Safaricom sends to your B2C result URL after a B2C payment is processed.
 
@@ -609,7 +788,7 @@ curl --location 'http://localhost:8000/api/v1/mpesa/test-b2c-result' \
 
 ---
 
-## 8. B2C Timeout Callback Test
+## 9. B2C Timeout Callback Test
 
 Test the B2C timeout callback. This simulates what Safaricom sends when a B2C payment request times out.
 
@@ -670,7 +849,7 @@ curl --location 'http://localhost:8000/api/v1/mpesa/test-b2c-timeout' \
 
 ---
 
-## 9. Get Test Transactions
+## 10. Get Test Transactions
 
 Retrieve the 20 most recent M-Pesa transactions for debugging purposes.
 
@@ -725,7 +904,7 @@ curl --location 'http://localhost:8000/api/v1/mpesa/test-transactions' \
 
 ---
 
-## 10. Logging
+## 11. Logging
 
 All test endpoints include comprehensive logging to help you debug issues. Logs are written to your Laravel log file (typically `storage/logs/laravel.log`).
 

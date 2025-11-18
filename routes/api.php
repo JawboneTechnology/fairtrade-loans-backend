@@ -133,7 +133,8 @@ Route::prefix('v1')->group(function () {
             
             // Transaction management
             Route::get('transactions', [MpesaController::class, 'getUserTransactions']); // Get user transactions
-            Route::post('query-status', [MpesaController::class, 'queryTransactionStatus']); // Query transaction status
+            Route::post('query-status', [MpesaController::class, 'queryTransactionStatus']); // Query transaction status from M-Pesa API
+            Route::post('verify-payment', [MpesaController::class, 'verifyPayment']); // Verify payment after STK Push callback
             
             // Loan information for paybill users
             Route::get('loan-info/{loan_identifier}', [MpesaController::class, 'getLoanPaymentInfo']); // Get loan payment info

@@ -403,7 +403,7 @@ class MpesaController extends Controller
     }
 
     /**
-     * Query transaction status
+     * Query transaction status from M-Pesa API
      */
     public function queryTransactionStatus(Request $request): JsonResponse
     {
@@ -424,6 +424,127 @@ class MpesaController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to query transaction status',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Verify payment status after STK Push
+     * 
+     * This endpoint checks the local database for payment confirmation
+     * after STK Push callback has been received
+     * 
+     * Endpoint: POST /api/v1/mpesa/verify-payment
+     * 
+     * Request Body:
+     * {
+     *   "checkout_request_id": "ws_CO_17112025102245"
+     * }
+     * 
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function verifyPayment(Request $request): JsonResponse
+    {
+        $request->validate([
+            'checkout_request_id' => 'required|string'
+        ]);
+
+        try {
+            $checkoutRequestId = $request->checkout_request_id;
+
+            Log::info('=== PAYMENT VERIFICATION REQUESTED ===');
+            Log::info(PHP_EOL . json_encode([
+                'checkout_request_id' => $checkoutRequestId
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+            // Get transaction from database
+            $transaction = $this->mpesaService->getTransactionByCheckoutId($checkoutRequestId);
+
+            if (!$transaction) {
+                Log::warning('=== TRANSACTION NOT FOUND ===');
+                Log::warning("Checkout Request ID: {$checkoutRequestId}");
+
+                return response()->json([
+                    'success' => false,
+                    'payment_complete' => false,
+                    'message' => 'Transaction not found. Please try again.',
+                    'status' => 'NOT_FOUND'
+                ], 404);
+            }
+
+            // Check transaction status
+            $paymentComplete = ($transaction->status === 'SUCCESS');
+            $isPending = ($transaction->status === 'PENDING');
+            $isFailed = ($transaction->status === 'FAILED');
+
+            Log::info('=== PAYMENT VERIFICATION RESULT ===');
+            Log::info(PHP_EOL . json_encode([
+                'transaction_id' => $transaction->transaction_id,
+                'checkout_request_id' => $checkoutRequestId,
+                'status' => $transaction->status,
+                'payment_complete' => $paymentComplete,
+                'amount' => $transaction->amount,
+                'mpesa_receipt' => $transaction->mpesa_receipt_number
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+            // Build response based on status
+            if ($paymentComplete) {
+                return response()->json([
+                    'success' => true,
+                    'payment_complete' => true,
+                    'message' => 'Payment completed successfully',
+                    'status' => 'SUCCESS',
+                    'data' => [
+                        'transaction_id' => $transaction->transaction_id,
+                        'amount_paid' => (float) $transaction->amount,
+                        'mpesa_receipt_number' => $transaction->mpesa_receipt_number,
+                        'transaction_date' => $transaction->transaction_date?->format('Y-m-d H:i:s'),
+                        'phone_number' => $transaction->phone_number,
+                        'account_reference' => $transaction->account_reference,
+                        'result_description' => $transaction->result_desc
+                    ]
+                ]);
+            } elseif ($isPending) {
+                return response()->json([
+                    'success' => true,
+                    'payment_complete' => false,
+                    'message' => 'Payment is still pending. Please check your phone for M-Pesa prompt.',
+                    'status' => 'PENDING',
+                    'data' => [
+                        'transaction_id' => $transaction->transaction_id,
+                        'amount' => (float) $transaction->amount,
+                        'phone_number' => $transaction->phone_number,
+                        'account_reference' => $transaction->account_reference
+                    ]
+                ]);
+            } else {
+                // Failed or other status
+                return response()->json([
+                    'success' => false,
+                    'payment_complete' => false,
+                    'message' => 'Payment failed or was cancelled',
+                    'status' => $transaction->status,
+                    'data' => [
+                        'transaction_id' => $transaction->transaction_id,
+                        'result_code' => $transaction->result_code,
+                        'result_description' => $transaction->result_desc,
+                        'amount' => (float) $transaction->amount
+                    ]
+                ], 400);
+            }
+
+        } catch (\Exception $e) {
+            Log::error('=== ERROR VERIFYING PAYMENT ===');
+            Log::error('Error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
+
+            return response()->json([
+                'success' => false,
+                'payment_complete' => false,
+                'message' => 'Error verifying payment status',
+                'status' => 'ERROR',
                 'error' => $e->getMessage()
             ], 500);
         }
