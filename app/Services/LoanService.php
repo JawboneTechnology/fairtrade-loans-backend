@@ -675,7 +675,7 @@ class LoanService
                     'payment_type' => $transaction->payment_type,
                     'transaction_reference' => $transaction->transaction_reference,
                 ];
-            });
+            })->toArray();
 
         } catch (\Exception $e) {
             throw $e;
@@ -685,8 +685,8 @@ class LoanService
     public function getUserRecentLoan(User $user): array
     {
         try {
-            // Fetch the most recent loan with deductions and loan type
-            $loan = Loan::with(['deductions', 'loanType'])
+            // Fetch the most recent loan with deductions, transactions and loan type
+            $loan = Loan::with(['deductions', 'transactions', 'loanType'])
                 ->where('employee_id', $user->id)
                 ->orderBy('applied_at', 'desc')
                 ->first();
@@ -695,14 +695,17 @@ class LoanService
                 return [];
             }
 
-            // Calculate the total amount paid from deductions
-            $totalPaid = collect($loan->deductions)->sum('deduction_amount');
+            // Calculate the total amount paid from both deductions and transactions
+            $totalPaidFromDeductions = collect($loan->deductions)->sum('deduction_amount');
+            $totalPaidFromTransactions = collect($loan->transactions)->sum('amount');
+            $totalPaid = $totalPaidFromDeductions + $totalPaidFromTransactions;
 
-            // Calculate the outstanding amount
-            $outstanding = $loan->loan_amount - $totalPaid;
+            // Use loan_balance for accurate outstanding amount
+            $outstanding = $loan->loan_balance;
 
-            // Calculate the percentage complete
-            $percentageComplete = ($totalPaid / $loan->loan_amount) * 100;
+            // Calculate the percentage complete based on loan amount
+            $loanAmount = $loan->loan_amount > 0 ? $loan->loan_amount : 1; // Prevent division by zero
+            $percentageComplete = ($totalPaid / $loanAmount) * 100;
 
             // Get the loan type name
             $loanTypeName = $loan->loanType->name;
@@ -729,8 +732,8 @@ class LoanService
     public function getUserAllLoansWithCalculations(User $user): array
     {
         try {
-            // Fetch only active loans with deductions and loan type, ordered by most recent first
-            $loans = Loan::with(['deductions', 'loanType'])
+            // Fetch only active loans with deductions, transactions and loan type, ordered by most recent first
+            $loans = Loan::with(['deductions', 'transactions', 'loanType'])
                 ->where('employee_id', $user->id)
                 // ->where('loan_status', 'active')
                 ->orderBy('applied_at', 'desc')
@@ -742,14 +745,17 @@ class LoanService
 
             // Process each loan with calculations
             return $loans->map(function ($loan) {
-                // Calculate the total amount paid from deductions
-                $totalPaid = collect($loan->deductions)->sum('deduction_amount');
+                // Calculate the total amount paid from both deductions and transactions
+                $totalPaidFromDeductions = collect($loan->deductions)->sum('deduction_amount');
+                $totalPaidFromTransactions = collect($loan->transactions)->sum('amount');
+                $totalPaid = $totalPaidFromDeductions + $totalPaidFromTransactions;
 
-                // Calculate the outstanding amount
-                $outstanding = $loan->loan_amount - $totalPaid;
+                // Use loan_balance for accurate outstanding amount
+                $outstanding = $loan->loan_balance;
 
                 // Calculate the percentage complete
-                $percentageComplete = $loan->loan_amount > 0 ? ($totalPaid / $loan->loan_amount) * 100 : 0;
+                $loanAmount = $loan->loan_amount > 0 ? $loan->loan_amount : 1; // Prevent division by zero
+                $percentageComplete = ($totalPaid / $loanAmount) * 100;
 
                 // Get the loan type name
                 $loanTypeName = $loan->loanType ? $loan->loanType->name : 'N/A';

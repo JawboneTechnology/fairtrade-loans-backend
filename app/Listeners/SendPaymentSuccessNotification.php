@@ -54,7 +54,7 @@ class SendPaymentSuccessNotification implements ShouldQueue
     /**
      * Send SMS directly via listener
      */
-    private function sendSMSDirectly(PaymentSuccessful $event): void
+    private function sendSMSDirectly(PaymentSuccessful $event, SMSService $smsService): void
     {
         // Get user phone number
         $phoneNumber = $event->user->phone_number;
@@ -67,8 +67,8 @@ class SendPaymentSuccessNotification implements ShouldQueue
         // Create payment success SMS message
         $message = $this->buildPaymentSuccessMessage($event);
 
-    // Send SMS notification
-    $smsService->sendSMS($phoneNumber, $message);
+        // Send SMS notification
+        $smsService->sendSMS($phoneNumber, $message);
 
         Log::info('Payment success SMS sent directly', [
             'user_id'        => $event->user->id,

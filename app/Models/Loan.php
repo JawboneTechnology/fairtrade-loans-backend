@@ -156,30 +156,30 @@ class Loan extends Model
 
     public function getUserLoanStats(string $employeeId): array
     {
-        $userLoans = $this->where('employee_id', $employeeId);
-
         $stats = [
             // Basic counts
-            'total_loans' => $userLoans->count(),
-            'approved_loans' => $userLoans->whereNotNull('approved_at')->count(),
-            'pending_loans' => $userLoans->whereNull('approved_at')->count(),
-            'rejected_loans' => $userLoans->where('loan_status', 'rejected')->count(),
+            'total_loans' => $this->where('employee_id', $employeeId)->count(),
+            'approved_loans' => $this->where('employee_id', $employeeId)->whereNotNull('approved_at')->count(),
+            'pending_loans' => $this->where('employee_id', $employeeId)->whereNull('approved_at')->count(),
+            'rejected_loans' => $this->where('employee_id', $employeeId)->where('loan_status', 'rejected')->count(),
 
             // Amount metrics
-            'total_requested' => $userLoans->sum('loan_amount'),
-            'total_approved' => $userLoans->sum('approved_amount'),
-            'total_balance' => $userLoans->sum('loan_balance'),
-            'avg_loan_amount' => $userLoans->avg('loan_amount'),
+            'total_requested' => $this->where('employee_id', $employeeId)->sum('loan_amount'),
+            'total_approved' => $this->where('employee_id', $employeeId)->sum('approved_amount'),
+            'total_balance' => $this->where('employee_id', $employeeId)->sum('loan_balance'),
+            'avg_loan_amount' => $this->where('employee_id', $employeeId)->avg('loan_amount'),
 
             // Status breakdown
-            'status_distribution' => $userLoans->select('loan_status')
+            'status_distribution' => $this->where('employee_id', $employeeId)
+                ->select('loan_status')
                 ->selectRaw('count(*) as count')
                 ->groupBy('loan_status')
                 ->get()
                 ->pluck('count', 'loan_status'),
 
             // Loan type breakdown
-            'type_distribution' => $userLoans->with('loanType:id,name')
+            'type_distribution' => $this->where('employee_id', $employeeId)
+                ->with('loanType:id,name')
                 ->select('loan_type_id')
                 ->selectRaw('count(*) as count')
                 ->selectRaw('sum(loan_amount) as total_amount')
@@ -187,7 +187,8 @@ class Loan extends Model
                 ->get(),
 
             // Current active loans
-            'active_loans' => $userLoans->where('loan_balance', '>', 0)
+            'active_loans' => $this->where('employee_id', $employeeId)
+                ->where('loan_balance', '>', 0)
                 ->where('loan_status', 'approved')
                 ->count(),
 
@@ -197,7 +198,8 @@ class Loan extends Model
             })->count(),
 
             // Recent loans (last 5)
-            'recent_loans' => $userLoans->with('loanType:id,name')
+            'recent_loans' => $this->where('employee_id', $employeeId)
+                ->with('loanType:id,name')
                 ->latest('applied_at')
                 ->limit(5)
                 ->get()
