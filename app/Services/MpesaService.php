@@ -168,27 +168,21 @@ class MpesaService
                     }
                 }
 
-                // Update transaction as successful
+                // Update transaction as successful with actual paid amount from callback
                 $transaction->update([
-                    'status' => 'SUCCESS',
-                    'result_code' => $resultCode,
-                    'result_desc' => $stkCallback['ResultDesc'],
-                    'mpesa_receipt_number' => $mpesaReceiptNumber,
-                    'transaction_date' => $transactionDate,
-                    'callback_data' => $callbackData,
+                    'status'                => 'SUCCESS',
+                    'result_code'           => $resultCode,
+                    'result_desc'           => $stkCallback['ResultDesc'],
+                    'amount'                => $amount, // Update with actual amount paid from M-Pesa
+                    'mpesa_receipt_number'  => $mpesaReceiptNumber,
+                    'transaction_date'      => $transactionDate,
+                    'callback_data'         => $callbackData,
                 ]);
 
                 // Process the payment (e.g., update loan balance)
                 if ($transaction->loan_id) {
-                    $this->processLoanPayment($transaction);
+                    $this->processLoanPayment($transaction->fresh()); // Use fresh() to get updated amount
                 }
-
-                Log::info('=== STK PUSH PAYMENT PROCESSED SUCCESSFULLY ===');
-                Log::info(PHP_EOL . json_encode([
-                    'transaction_id' => $transaction->transaction_id,
-                    'mpesa_receipt' => $mpesaReceiptNumber,
-                    'amount' => $amount
-                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
             } else {
                 // Payment failed
@@ -377,6 +371,16 @@ class MpesaService
         
         try {
             if (!$transaction->loan_id) {
+                Log::warning('No loan_id in transaction, skipping payment processing');
+                return;
+            }
+
+            // Check if this payment has already been processed to prevent duplicate processing
+            $transactionReference = $transaction->mpesa_receipt_number ?? $transaction->transaction_id;
+            $existingTransaction = \App\Models\Transaction::where('transaction_reference', $transactionReference)->first();
+            
+            if ($existingTransaction) {
+                DB::commit();
                 return;
             }
 
@@ -404,53 +408,39 @@ class MpesaService
             // Mark loan as completed when balance reaches zero
             if ($newBalance <= 0) {
                 $updateData['loan_status'] = 'completed';
-                Log::info('=== LOAN FULLY PAID - MARKING AS COMPLETED ===');
-                Log::info(PHP_EOL . json_encode([
-                    'loan_id' => $loan->id,
-                    'loan_number' => $loan->loan_number,
-                    'final_payment_amount' => $transaction->amount
-                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
             }
             
             $loan->update($updateData);
 
             // Create a transaction record in your existing transactions table
+            $transactionReference = $transaction->mpesa_receipt_number ?? $transaction->transaction_id;
+            
             $loanTransaction = \App\Models\Transaction::create([
                 'id'                    => Str::uuid(),
                 'loan_id'               => $loan->id,
                 'employee_id'           => $loan->employee_id,
-                'amount'                => $transaction->amount,
+                'amount'                => $transaction->amount, // Amount from callback (actual paid amount)
                 'payment_type'          => 'Mobile_Money',
-                'transaction_reference' => $transaction->mpesa_receipt_number ?? $transaction->transaction_id,
+                'transaction_reference' => $transactionReference,
                 'transaction_date'      => $transaction->transaction_date ?? now(),
             ]);
 
             // Determine payment method for SMS
             $paymentMethod = $transaction->payment_method === 'PAYBILL' ? 'M-Pesa Paybill' : 'M-Pesa (App)';
 
-            //TODO: Fire payment successful event for SMS notification
+            // Refresh loan to get updated balance
+            $loan->refresh();
+
+            // Fire payment successful event for notifications
             event(new PaymentSuccessful(
                 $transaction,
-                $loan,
+                $loan, // Now has updated balance
                 $user,
                 $newBalance,
                 $paymentMethod
             ));
 
             DB::commit();
-
-            Log::info('=== LOAN PAYMENT PROCESSED SUCCESSFULLY ===');
-            Log::info(PHP_EOL . json_encode([
-                'loan_id' => $loan->id,
-                'transaction_id' => $loanTransaction->id,
-                'mpesa_transaction_id' => $transaction->transaction_id,
-                'amount' => $transaction->amount,
-                'old_balance' => $oldBalance,
-                'new_balance' => $newBalance,
-                'payment_method' => $paymentMethod,
-                'user_id' => $user->id,
-                'phone_number' => $user->phone_number
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         } catch (\Exception $e) {
             DB::rollBack();

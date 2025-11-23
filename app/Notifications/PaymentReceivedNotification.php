@@ -14,15 +14,24 @@ class PaymentReceivedNotification extends Notification implements ShouldQueue
     public $applicantName;
     public $transaction;
     public $loan;
+    public $paymentMethod;
+    public $newLoanBalance;
 
     /**
      * Create a new notification instance.
      */
-    public function __construct(string $applicantName, $transaction, $loan)
-    {
+    public function __construct(
+        string $applicantName, 
+        $transaction, 
+        $loan, 
+        string $paymentMethod = 'M-Pesa',
+        float $newLoanBalance = null
+    ) {
         $this->applicantName = $applicantName;
         $this->transaction = $transaction;
         $this->loan = $loan;
+        $this->paymentMethod = $paymentMethod;
+        $this->newLoanBalance = $newLoanBalance ?? $loan->loan_balance;
     }
 
     /**
@@ -41,11 +50,13 @@ class PaymentReceivedNotification extends Notification implements ShouldQueue
     public function toMail(object $notifiable): MailMessage
     {
         return (new MailMessage)
-            ->subject('Payment Received')
+            ->subject('Payment Received - ' . $this->loan->loan_number)
             ->view('emails.payment-received-notification', [
-                'applicantName' => $this->applicantName,
-                'transaction'   => $this->transaction,
-                'loan'          => $this->loan,
+                'applicantName'   => $this->applicantName,
+                'transaction'     => $this->transaction,
+                'loan'            => $this->loan,
+                'paymentMethod'   => $this->paymentMethod,
+                'newLoanBalance'  => $this->newLoanBalance, // Pass the new balance explicitly
             ]);
     }
 
@@ -60,6 +71,7 @@ class PaymentReceivedNotification extends Notification implements ShouldQueue
             'loan_number' => $this->loan->loan_number ?? null,
             'amount' => $this->transaction->amount ?? null,
             'transaction_id' => $this->transaction->transaction_id ?? null,
+            'payment_method' => $this->paymentMethod,
         ];
     }
 }
