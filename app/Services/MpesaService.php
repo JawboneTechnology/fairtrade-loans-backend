@@ -291,10 +291,10 @@ class MpesaService
     public function processPaybillPayment(array $paymentData): array
     {
         try {
-            $billRefNumber = $paymentData['BillRefNumber'] ?? '';
-            $amount = $paymentData['TransAmount'] ?? 0;
-            $phoneNumber = $paymentData['MSISDN'] ?? '';
-            $transactionId = $paymentData['TransID'] ?? '';
+            $billRefNumber  = $paymentData['BillRefNumber'] ?? '';
+            $amount         = $paymentData['TransAmount'] ?? 0;
+            $phoneNumber    = $paymentData['MSISDN'] ?? '';
+            $transactionId  = $paymentData['TransID'] ?? '';
 
             // Validate and get loan information
             $validation = $this->validatePaybillPayment($billRefNumber, $amount);
