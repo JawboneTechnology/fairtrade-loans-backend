@@ -296,9 +296,10 @@ class LoanService
         SendSMSJob::dispatch($recipient, $message);
     }
 
-    public function approveLoan(int $loanId, array $data): Loan
+    public function approveLoan(string $loanId, array $data): Loan
     {
         $loan = Loan::findOrFail($loanId);
+        // $userId = auth()->id();
 
         // Check if loan exists
         if (!$loan) {
