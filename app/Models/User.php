@@ -95,4 +95,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(Dependant::class);
     }
+
+    public function grants(): HasMany
+    {
+        return $this->hasMany(\App\Models\Grant::class, 'user_id');
+    }
 }

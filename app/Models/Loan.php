@@ -38,6 +38,9 @@ class Loan extends Model
     protected $casts = [
         'qualifications'  => 'array', // This will auto-convert JSON to an array.
         'guarantors'      => 'array',
+        'approved_at'     => 'datetime',
+        'applied_at'      => 'datetime',
+        'next_due_date'   => 'date',
     ];
 
     protected static function boot(): void

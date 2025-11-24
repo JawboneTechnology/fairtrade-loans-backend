@@ -770,4 +770,211 @@ class MpesaController extends Controller
              . "Receipt: {$receiptNumber}. New loan balance: KES {$newBalance}. "
              . "Payment processed on {$paymentDate} via M-Pesa. Thank you for choosing our services!";
     }
+
+    /**
+     * Get M-Pesa transactions for DataTables (Admin)
+     * Supports server-side processing with pagination, searching, and sorting
+     */
+    public function getMpesaTransactionsForDataTables(Request $request): JsonResponse
+    {
+        try {
+            // DataTables parameters
+            $draw = $request->input('draw', 1);
+            $start = $request->input('start', 0);
+            $length = $request->input('length', 10);
+            $searchValue = $request->input('search.value', '');
+            $orderColumnIndex = $request->input('order.0.column', 0);
+            $orderDirection = $request->input('order.0.dir', 'desc');
+            
+            // Additional filters
+            $status = $request->input('status'); // SUCCESS, PENDING, FAILED
+            $dateFrom = $request->input('date_from');
+            $dateTo = $request->input('date_to');
+            $minAmount = $request->input('min_amount');
+            $maxAmount = $request->input('max_amount');
+
+            // Column mapping for sorting
+            $columns = [
+                0 => 'transaction_id',
+                1 => 'mpesa_receipt_number',
+                2 => 'phone_number',
+                3 => 'amount',
+                4 => 'status',
+                5 => 'transaction_date',
+                6 => 'created_at'
+            ];
+            
+            $orderColumn = $columns[$orderColumnIndex] ?? 'created_at';
+
+            // Base query with relationships
+            $query = \App\Models\MpesaTransaction::with(['user:id,first_name,last_name,email,phone_number', 'loan:id,loan_number'])
+                ->select([
+                    'transaction_id',
+                    'checkout_request_id',
+                    'merchant_request_id',
+                    'mpesa_receipt_number',
+                    'phone_number',
+                    'amount',
+                    'account_reference',
+                    'transaction_description',
+                    'transaction_type',
+                    'status',
+                    'result_code',
+                    'result_desc',
+                    'transaction_date',
+                    'user_id',
+                    'loan_id',
+                    'payment_method',
+                    'created_at',
+                    'updated_at'
+                ]);
+
+            // Apply status filter
+            if ($status) {
+                $query->where('status', $status);
+            }
+
+            // Apply date range filter
+            if ($dateFrom) {
+                $query->whereDate('created_at', '>=', $dateFrom);
+            }
+            if ($dateTo) {
+                $query->whereDate('created_at', '<=', $dateTo);
+            }
+
+            // Apply amount range filter
+            if ($minAmount) {
+                $query->where('amount', '>=', $minAmount);
+            }
+            if ($maxAmount) {
+                $query->where('amount', '<=', $maxAmount);
+            }
+
+            // Get total records before filtering
+            $recordsTotal = \App\Models\MpesaTransaction::count();
+
+            // Apply search filter
+            if ($searchValue) {
+                $query->where(function ($q) use ($searchValue) {
+                    $q->where('mpesa_receipt_number', 'like', "%{$searchValue}%")
+                      ->orWhere('phone_number', 'like', "%{$searchValue}%")
+                      ->orWhere('account_reference', 'like', "%{$searchValue}%")
+                      ->orWhere('transaction_id', 'like', "%{$searchValue}%")
+                      ->orWhere('checkout_request_id', 'like', "%{$searchValue}%")
+                      ->orWhere('status', 'like', "%{$searchValue}%")
+                      ->orWhereHas('user', function ($q) use ($searchValue) {
+                          $q->where('first_name', 'like', "%{$searchValue}%")
+                            ->orWhere('last_name', 'like', "%{$searchValue}%")
+                            ->orWhere('email', 'like', "%{$searchValue}%");
+                      })
+                      ->orWhereHas('loan', function ($q) use ($searchValue) {
+                          $q->where('loan_number', 'like', "%{$searchValue}%");
+                      });
+                });
+            }
+
+            // Get filtered count
+            $recordsFiltered = $query->count();
+
+            // Apply sorting
+            $query->orderBy($orderColumn, $orderDirection);
+
+            // Apply pagination
+            $transactions = $query->skip($start)->take($length)->get();
+
+            // Format data for DataTables
+            $data = $transactions->map(function ($transaction) {
+                return [
+                    'transaction_id' => $transaction->transaction_id,
+                    'checkout_request_id' => $transaction->checkout_request_id,
+                    'merchant_request_id' => $transaction->merchant_request_id,
+                    'mpesa_receipt_number' => $transaction->mpesa_receipt_number ?? 'N/A',
+                    'phone_number' => $transaction->phone_number,
+                    'amount' => number_format($transaction->amount, 2),
+                    'amount_raw' => $transaction->amount, // For sorting
+                    'account_reference' => $transaction->account_reference,
+                    'transaction_description' => $transaction->transaction_description,
+                    'transaction_type' => $transaction->transaction_type,
+                    'status' => $transaction->status,
+                    'status_badge' => $this->getStatusBadge($transaction->status),
+                    'result_code' => $transaction->result_code,
+                    'result_desc' => $transaction->result_desc,
+                    'transaction_date' => $transaction->transaction_date ? $transaction->transaction_date->format('Y-m-d H:i:s') : null,
+                    'transaction_date_formatted' => $transaction->transaction_date ? $transaction->transaction_date->format('d M Y, h:i A') : 'N/A',
+                    'payment_method' => $transaction->payment_method ?? 'APP',
+                    'user' => $transaction->user ? [
+                        'id' => $transaction->user->id,
+                        'name' => $transaction->user->first_name . ' ' . $transaction->user->last_name,
+                        'email' => $transaction->user->email,
+                        'phone' => $transaction->user->phone_number,
+                    ] : null,
+                    'loan' => $transaction->loan ? [
+                        'id' => $transaction->loan->id,
+                        'loan_number' => $transaction->loan->loan_number,
+                    ] : null,
+                    'created_at' => $transaction->created_at->format('Y-m-d H:i:s'),
+                    'created_at_formatted' => $transaction->created_at->format('d M Y, h:i A'),
+                    'updated_at' => $transaction->updated_at->format('Y-m-d H:i:s'),
+                ];
+            });
+
+            // DataTables response format
+            return response()->json([
+                'draw' => intval($draw),
+                'recordsTotal' => $recordsTotal,
+                'recordsFiltered' => $recordsFiltered,
+                'data' => $data,
+                'success' => true
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('=== ERROR FETCHING MPESA TRANSACTIONS FOR DATATABLES ===');
+            Log::error('Error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
+
+            return response()->json([
+                'draw' => intval($request->input('draw', 1)),
+                'recordsTotal' => 0,
+                'recordsFiltered' => 0,
+                'data' => [],
+                'success' => false,
+                'error' => 'Failed to fetch transactions: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get status badge HTML/CSS class for DataTables
+     */
+    private function getStatusBadge(string $status): array
+    {
+        $badges = [
+            'SUCCESS' => [
+                'text' => 'Success',
+                'class' => 'badge-success',
+                'color' => '#28a745'
+            ],
+            'PENDING' => [
+                'text' => 'Pending',
+                'class' => 'badge-warning',
+                'color' => '#ffc107'
+            ],
+            'FAILED' => [
+                'text' => 'Failed',
+                'class' => 'badge-danger',
+                'color' => '#dc3545'
+            ],
+            'CANCELLED' => [
+                'text' => 'Cancelled',
+                'class' => 'badge-secondary',
+                'color' => '#6c757d'
+            ]
+        ];
+
+        return $badges[$status] ?? [
+            'text' => $status,
+            'class' => 'badge-secondary',
+            'color' => '#6c757d'
+        ];
+    }
 }

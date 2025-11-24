@@ -213,23 +213,33 @@ Route::prefix('v1')->group(function () {
 
             // Users Endpoints
             Route::get('users', [UserController::class, 'getUsers']); // ->middleware('can:view user');
+            Route::get('employees/statistics', [UserController::class, 'getEmployeeStatistics']); // Get employee statistics for dashboard
             Route::delete('user/{id}', [UserController::class, 'deleteUser']); // ->middleware('can:delete user');
             Route::post('user/create', [UserController::class, 'createUser']); // ->middleware('can:create user');
             Route::patch('/user/{id}', [UserController::class, 'updateUser']); // ->middleware('can:update user');
+            Route::patch('/employee/{id}/profile', [UserController::class, 'updateEmployeeProfile']); // Update employee profile
+            Route::patch('/employee/{id}/change-password', [UserController::class, 'changeEmployeePassword']); // Change employee password (Admin)
+            Route::patch('/employee/{id}/roles-change', [UserController::class, 'changeEmployeeRoles']); // Change employee roles (Admin)
+            Route::delete('/user/{id}/delete-account', [UserController::class, 'deleteUserAccount']); // Delete user account (Admin)
+            Route::post('/employees/bulk-import', [UserController::class, 'bulkImportEmployees']); // Bulk import employees from CSV (Admin)
             Route::get('user/get-employees', [UserController::class, 'getSystemEmployees']);
             Route::get('user/{id}/employee', [UserController::class, 'getEmployee']);
 
             // Loan Endpoints
+            Route::get('/loans/{loanId}/details', [LoanController::class, 'getUserLoanDetails']); // Get detailed loan information by loan ID
+            Route::get('/employees/{employeeId}/loans', [LoanController::class, 'getEmployeeLoans']); // Get employee loans
             Route::post('/employees/{employeeId}/loans', [LoanController::class, 'applyForLoan']); // ->middleware('can: apply loan');
+            Route::post('/employees/{employeeId}/deductions', [LoanController::class, 'processEmployeeDeduction']); // Process employee deduction
             Route::get('/employees/{loan_id}/loan-status', [LoanController::class, 'getLoanStatus']); // ->middleware('can: get loan status');
             Route::post('/approve-loan/{loan_id}', [LoanController::class, 'approveLoan']); // ->middleware('can: approve loan');
             Route::get('/employees/{employeeId}/loan-limit', [LoanController::class, 'calculateLoanLimit']); // ->middleware('can: calculate loan limit');
-            Route::get('/process-deductions/{employee_id}', [LoanController::class, 'processDeductions']); // ->middleware('can: process deductions');
+            Route::get('/deductions/monthly/datatables', [LoanController::class, 'processDeductions']); // Get monthly deductions for DataTables
             Route::post('/loans/{loanId}/approve', [LoanController::class, 'approveLoan']); // ->middleware('can: approve loan');
             Route::patch('/employees/{loanId}/salary', [UserController::class, 'setEmployeeSalary']); // ->middleware('can: set employee salary');
             Route::post('/send-sms', [SMSController::class, 'sendSMS']); // ->middleware('can: send sms');
             Route::get('/sent-sms', [SMSController::class, 'getSentSMS']); // ->middleware('can: get sent sms');
             Route::post('/send-bulk-sms', [SMSController::class, 'sendBulkSMS']); // ->middleware('can: send bulk sms');
+            Route::get('/sms/messages/datatables', [SMSController::class, 'getSmsMessagesForDataTables']); // Get SMS messages for DataTables
 
             // Roles Endpoints
             Route::get('roles', [RoleController::class, 'index']); // ->middleware('can:view role');
@@ -258,8 +268,14 @@ Route::prefix('v1')->group(function () {
             Route::get('loans/{loanId}/transactions', [LoanController::class, 'getLoanTransactions']); // ->middleware('can:get loan transactions');
 
             Route::get('loans', [LoanController::class, 'getLoans']); // ->middleware('can:get loans');
+            Route::get('loans/statistics', [LoanController::class, 'getLoanStatistics']); // Get loan statistics for dashboard
             Route::get('loans/{userId}/personal', [LoanController::class, 'getPersonalLoans']); // ->middleware('can:get personal loans');
             Route::get('loans/{userId}/personal-deduction', [LoanController::class, 'getLoanPersonalDeductions']); // ->middleware('can:get personal deduction')
+            Route::get('loans/deductions/datatables', [LoanController::class, 'getLoanDeductionsForDataTables']); // Get loan deductions for DataTables
+            Route::get('transactions/{employeeId}/datatables', [LoanController::class, 'getUserTransactionsForDataTables']); // Get user transactions for DataTables
+
+            // M-Pesa Admin Endpoints
+            Route::get('mpesa/transactions/datatables', [MpesaController::class, 'getMpesaTransactionsForDataTables']); // Get M-Pesa transactions for DataTables
         });
     });
 });

@@ -249,51 +249,116 @@ class LoanService
         return $employeeCheck;
     }
 
-    public function processMonthlyDeductions(): void
+    public function processMonthlyDeductions(): JsonResponse
     {
-        $today = now()->startOfDay();
+        try {
+            $draw = request()->input('draw', 1);
+            $start = request()->input('start', 0);
+            $length = request()->input('length', 10);
+            $searchValue = request()->input('search.value', '');
+            $orderColumnIndex = request()->input('order.0.column', 0);
+            $orderDirection = request()->input('order.0.dir', 'desc');
 
-        $loans = Loan::where('loan_status', 'approved')
-            ->where('loan_balance', '>', 0)
-            ->where('next_due_date', '<=', $today)
-            ->get();
+            // Column mapping for sorting
+            $columns = [
+                0 => 'id',
+                1 => 'loan_id',
+                2 => 'employee_id',
+                3 => 'loan_number',
+                4 => 'deduction_amount',
+                5 => 'deduction_type',
+                6 => 'deduction_date',
+                7 => 'created_at',
+                8 => 'updated_at',
+            ];
 
-        DB::transaction(function () use ($loans) {
-            foreach ($loans as $loan) {
-                $deductionAmount = $loan->monthly_installment;
+            $orderColumn = $columns[$orderColumnIndex] ?? 'deduction_date';
 
-                // Deduct the installment from the remaining amount
-                $loan->loan_balance -= $deductionAmount;
-
-                // Check if the loan is fully paid
-                if ($loan->loan_balance <= 0) {
-                    $loan->loan_status = 'completed';
-                    $loan->loan_balance = 0;
-                } else {
-                    $loan->next_due_date = now()->addMonth();
-                }
-
-                $loan->save();
-
-                LoanDeduction::create([
-                    'loan_id' => $loan->id,
-                    'employee_id' => $loan->employee_id,
-                    'deduction_amount' => $deductionAmount,
+            $query = LoanDeduction::with([
+                    'loan:id,loan_number,loan_amount,loan_balance,loan_status,monthly_installment',
+                    'employee:id,first_name,last_name,email,phone_number,employee_id'
+                ])
+                ->select([
+                    'id',
+                    'loan_id',
+                    'employee_id',
+                    'loan_number',
+                    'deduction_amount',
+                    'deduction_type',
+                    'deduction_date',
+                    'created_at',
+                    'updated_at'
                 ]);
 
-                // Queue an SMS notification
-                $this->queueDeductionSMS($loan);
+            // Apply global search if provided
+            if ($searchValue) {
+                $query->where(function ($q) use ($searchValue) {
+                    $q->where('loan_number', 'like', "%{$searchValue}%")
+                        ->orWhere('deduction_amount', 'like', "%{$searchValue}%")
+                        ->orWhere('deduction_type', 'like', "%{$searchValue}%")
+                        ->orWhereHas('employee', function ($sq) use ($searchValue) {
+                            $sq->where('first_name', 'like', "%{$searchValue}%")
+                                ->orWhere('last_name', 'like', "%{$searchValue}%")
+                                ->orWhere('email', 'like', "%{$searchValue}%")
+                                ->orWhere('employee_id', 'like', "%{$searchValue}%");
+                        })
+                        ->orWhereHas('loan', function ($sq) use ($searchValue) {
+                            $sq->where('loan_number', 'like', "%{$searchValue}%");
+                        });
+                });
             }
-        });
-    }
 
-    protected function queueDeductionSMS(Loan $loan): void
-    {
-        $recipient = $loan->employee->phone_number;
-        $message = "Dear {$loan->employee->first_name}, your loan deduction of KES {$loan->monthly_installment} has been processed. Remaining balance: KES {$loan->remaining_amount}.";
+            $totalRecords = LoanDeduction::count();
+            $filteredRecords = $query->count();
 
-        // Dispatch the SMS job
-        SendSMSJob::dispatch($recipient, $message);
+            // Apply sorting
+            $query->orderBy($orderColumn, $orderDirection);
+
+            $deductions = $query->skip($start)
+                ->take($length)
+                ->get()
+                ->map(function ($deduction) {
+                    return [
+                        'id' => $deduction->id,
+                        'loan_id' => $deduction->loan_id,
+                        'employee_id' => $deduction->employee_id,
+                        'loan_number' => $deduction->loan_number,
+                        'deduction_amount' => number_format($deduction->deduction_amount, 2),
+                        'deduction_type' => $deduction->deduction_type ?? 'Automatic',
+                        'deduction_date' => $deduction->deduction_date ? \Carbon\Carbon::parse($deduction->deduction_date)->format('d M Y, h:i A') : null,
+                        'created_at' => $deduction->created_at ? $deduction->created_at->format('d M Y, h:i A') : null,
+                        'updated_at' => $deduction->updated_at ? $deduction->updated_at->format('d M Y, h:i A') : null,
+                        'loan' => $deduction->loan ? [
+                            'loan_number' => $deduction->loan->loan_number,
+                            'loan_amount' => number_format($deduction->loan->loan_amount, 2),
+                            'loan_balance' => number_format($deduction->loan->loan_balance, 2),
+                            'loan_status' => $deduction->loan->loan_status,
+                            'monthly_installment' => number_format($deduction->loan->monthly_installment, 2),
+                        ] : null,
+                        'employee' => $deduction->employee ? [
+                            'employee_id' => $deduction->employee->employee_id,
+                            'name' => $deduction->employee->first_name . ' ' . $deduction->employee->last_name,
+                            'email' => $deduction->employee->email,
+                            'phone_number' => $deduction->employee->phone_number,
+                        ] : null,
+                    ];
+                });
+
+            return response()->json([
+                'draw' => (int) $draw,
+                'recordsTotal' => $totalRecords,
+                'recordsFiltered' => $filteredRecords,
+                'data' => $deductions,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'draw' => (int) request()->input('draw', 1),
+                'recordsTotal' => 0,
+                'recordsFiltered' => 0,
+                'data' => [],
+                'error' => 'Exception Message: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
     public function approveLoan(string $loanId, array $data): Loan
@@ -587,7 +652,7 @@ class LoanService
         throw new \Exception('Failed to generate a unique transaction reference.');
     }
 
-    public function getLoanTransactions(int $loanId): JsonResponse
+    public function getLoanTransactions(string $loanId): JsonResponse
     {
         $transactions = Transaction::where('loan_id', $loanId)
             ->orderBy('transaction_date', 'desc');
@@ -809,31 +874,310 @@ class LoanService
 
     public function getUserPersonalLoans($employeeId): JsonResponse
     {
-        $loans = Loan::with('loanType')->where('employee_id', $employeeId)->get();
+        try {
+            $draw = request()->input('draw', 1);
+            $start = request()->input('start', 0);
+            $length = request()->input('length', 10);
+            $searchValue = request()->input('search.value', '');
+            $orderColumnIndex = request()->input('order.0.column', 0);
+            $orderDirection = request()->input('order.0.dir', 'desc');
 
-        return DataTables::of($loans)
-            ->addColumn('loan_type_name', function ($loan) {
-                return optional($loan->loanType)->name;
-            })
-            ->make(true);
+            // Column mapping for sorting
+            $columns = [
+                0 => 'id',
+                1 => 'loan_number',
+                2 => 'loan_type_id',
+                3 => 'loan_amount',
+                4 => 'loan_balance',
+                5 => 'interest_rate',
+                6 => 'tenure_months',
+                7 => 'monthly_installment',
+                8 => 'loan_status',
+                9 => 'next_due_date',
+                10 => 'approved_amount',
+                11 => 'approved_at',
+                12 => 'applied_at',
+                13 => 'created_at',
+                14 => 'updated_at',
+            ];
+
+            $orderColumn = $columns[$orderColumnIndex] ?? 'applied_at';
+
+            $query = Loan::with(['loanType', 'employee:id,first_name,last_name,email,phone_number'])
+                ->where('employee_id', $employeeId);
+
+            // Apply global search if provided
+            if ($searchValue) {
+                $query->where(function ($q) use ($searchValue) {
+                    $q->where('loan_number', 'like', "%{$searchValue}%")
+                        ->orWhere('loan_amount', 'like', "%{$searchValue}%")
+                        ->orWhere('loan_balance', 'like', "%{$searchValue}%")
+                        ->orWhere('loan_status', 'like', "%{$searchValue}%")
+                        ->orWhere('approved_amount', 'like', "%{$searchValue}%")
+                        ->orWhereHas('loanType', function ($sq) use ($searchValue) {
+                            $sq->where('name', 'like', "%{$searchValue}%");
+                        });
+                });
+            }
+
+            $totalRecords = Loan::where('employee_id', $employeeId)->count();
+            $filteredRecords = $query->count();
+
+            // Apply sorting
+            $query->orderBy($orderColumn, $orderDirection);
+
+            $loans = $query->skip($start)
+                ->take($length)
+                ->get()
+                ->map(function ($loan) {
+                    return [
+                        'id' => $loan->id,
+                        'loan_number' => $loan->loan_number,
+                        'loan_type_id' => $loan->loan_type_id,
+                        'loan_type_name' => optional($loan->loanType)->name,
+                        'loan_amount' => $loan->loan_amount,
+                        'loan_balance' => $loan->loan_balance,
+                        'interest_rate' => $loan->interest_rate,
+                        'tenure_months' => $loan->tenure_months,
+                        'monthly_installment' => $loan->monthly_installment,
+                        'loan_status' => $loan->loan_status,
+                        'next_due_date' => $loan->next_due_date,
+                        'approved_amount' => $loan->approved_amount,
+                        'approved_by' => $loan->approved_by,
+                        'approved_at' => $loan->approved_at,
+                        'applied_at' => $loan->applied_at,
+                        'remarks' => $loan->remarks,
+                        'guarantors' => $loan->guarantors,
+                        'qualifications' => $loan->qualifications,
+                        'created_at' => $loan->created_at,
+                        'updated_at' => $loan->updated_at,
+                        'loan_type' => $loan->loanType,
+                        'employee' => $loan->employee ? [
+                            'id' => $loan->employee->id,
+                            'name' => $loan->employee->first_name . ' ' . $loan->employee->last_name,
+                            'email' => $loan->employee->email,
+                            'phone_number' => $loan->employee->phone_number,
+                        ] : null,
+                    ];
+                });
+
+            return response()->json([
+                'draw' => (int) $draw,
+                'recordsTotal' => $totalRecords,
+                'recordsFiltered' => $filteredRecords,
+                'data' => $loans,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'draw' => (int) request()->input('draw', 1),
+                'recordsTotal' => 0,
+                'recordsFiltered' => 0,
+                'data' => [],
+                'error' => 'Exception Message: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
     public function getLoanPersonalDeductions($employeeId): JsonResponse
     {
-        $deductions = LoanDeduction::where(['employee_id' => $employeeId])->get();
+        try {
+            $draw = request()->input('draw', 1);
+            $start = request()->input('start', 0);
+            $length = request()->input('length', 10);
+            $searchValue = request()->input('search.value', '');
+            $orderColumnIndex = request()->input('order.0.column', 0);
+            $orderDirection = request()->input('order.0.dir', 'desc');
 
-        return DataTables::of($deductions)->make(true);
+            // Column mapping for sorting
+            $columns = [
+                0 => 'id',
+                1 => 'loan_id',
+                2 => 'employee_id',
+                3 => 'deduction_amount',
+                4 => 'deduction_type',
+                5 => 'deduction_date',
+                6 => 'created_at',
+                7 => 'updated_at',
+            ];
+
+            $orderColumn = $columns[$orderColumnIndex] ?? 'deduction_date';
+
+            $query = LoanDeduction::with(['loan:id,loan_number,loan_amount,loan_balance,loan_status', 'employee:id,first_name,last_name,email,phone_number'])
+                ->where('employee_id', $employeeId);
+
+            // Apply global search if provided
+            if ($searchValue) {
+                $query->where(function ($q) use ($searchValue) {
+                    $q->where('deduction_amount', 'like', "%{$searchValue}%")
+                        ->orWhere('deduction_type', 'like', "%{$searchValue}%")
+                        ->orWhereHas('loan', function ($sq) use ($searchValue) {
+                            $sq->where('loan_number', 'like', "%{$searchValue}%");
+                        });
+                });
+            }
+
+            $totalRecords = LoanDeduction::where('employee_id', $employeeId)->count();
+            $filteredRecords = $query->count();
+
+            // Apply sorting
+            $query->orderBy($orderColumn, $orderDirection);
+
+            $deductions = $query->skip($start)
+                ->take($length)
+                ->get()
+                ->map(function ($deduction) {
+                    return [
+                        'id' => $deduction->id,
+                        'loan_id' => $deduction->loan_id,
+                        'employee_id' => $deduction->employee_id,
+                        'deduction_amount' => $deduction->deduction_amount,
+                        'deduction_type' => $deduction->deduction_type,
+                        'deduction_date' => $deduction->deduction_date,
+                        'created_at' => $deduction->created_at,
+                        'updated_at' => $deduction->updated_at,
+                        'loan' => $deduction->loan ? [
+                            'loan_number' => $deduction->loan->loan_number,
+                            'loan_amount' => $deduction->loan->loan_amount,
+                            'loan_balance' => $deduction->loan->loan_balance,
+                            'loan_status' => $deduction->loan->loan_status,
+                        ] : null,
+                        'employee' => $deduction->employee ? [
+                            'name' => $deduction->employee->first_name . ' ' . $deduction->employee->last_name,
+                            'email' => $deduction->employee->email,
+                            'phone_number' => $deduction->employee->phone_number,
+                        ] : null,
+                    ];
+                });
+
+            return response()->json([
+                'draw' => (int) $draw,
+                'recordsTotal' => $totalRecords,
+                'recordsFiltered' => $filteredRecords,
+                'data' => $deductions,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'draw' => (int) request()->input('draw', 1),
+                'recordsTotal' => 0,
+                'recordsFiltered' => 0,
+                'data' => [],
+                'error' => 'Exception Message: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
     public function getLoans(): JsonResponse
     {
-        $loans = Loan::with('loanType')->get();
+        try {
+            $draw = request()->input('draw', 1);
+            $start = request()->input('start', 0);
+            $length = request()->input('length', 10);
+            $searchValue = request()->input('search.value', '');
+            $orderColumnIndex = request()->input('order.0.column', 0);
+            $orderDirection = request()->input('order.0.dir', 'desc');
 
-        return DataTables::of($loans)
-            ->addColumn('loan_type_name', function ($loan) {
-                return optional($loan->loanType)->name;
-            })
-            ->make(true);
+            // Column mapping for sorting
+            $columns = [
+                0 => 'id',
+                1 => 'loan_number',
+                2 => 'employee_id',
+                3 => 'loan_type_id',
+                4 => 'loan_amount',
+                5 => 'loan_balance',
+                6 => 'interest_rate',
+                7 => 'tenure_months',
+                8 => 'monthly_installment',
+                9 => 'loan_status',
+                10 => 'next_due_date',
+                11 => 'approved_amount',
+                12 => 'approved_at',
+                13 => 'applied_at',
+                14 => 'created_at',
+                15 => 'updated_at',
+            ];
+
+            $orderColumn = $columns[$orderColumnIndex] ?? 'applied_at';
+
+            $query = Loan::with(['loanType', 'employee:id,first_name,last_name,email,phone_number,employee_id']);
+
+            // Apply global search if provided
+            if ($searchValue) {
+                $query->where(function ($q) use ($searchValue) {
+                    $q->where('loan_number', 'like', "%{$searchValue}%")
+                        ->orWhere('loan_amount', 'like', "%{$searchValue}%")
+                        ->orWhere('loan_balance', 'like', "%{$searchValue}%")
+                        ->orWhere('loan_status', 'like', "%{$searchValue}%")
+                        ->orWhere('approved_amount', 'like', "%{$searchValue}%")
+                        ->orWhereHas('loanType', function ($sq) use ($searchValue) {
+                            $sq->where('name', 'like', "%{$searchValue}%");
+                        })
+                        ->orWhereHas('employee', function ($sq) use ($searchValue) {
+                            $sq->where('first_name', 'like', "%{$searchValue}%")
+                                ->orWhere('last_name', 'like', "%{$searchValue}%")
+                                ->orWhere('email', 'like', "%{$searchValue}%")
+                                ->orWhere('employee_id', 'like', "%{$searchValue}%");
+                        });
+                });
+            }
+
+            $totalRecords = Loan::count();
+            $filteredRecords = $query->count();
+
+            // Apply sorting
+            $query->orderBy($orderColumn, $orderDirection);
+
+            $loans = $query->skip($start)
+                ->take($length)
+                ->get()
+                ->map(function ($loan) {
+                    return [
+                        'id'                  => $loan->id,
+                        'loan_number'         => $loan->loan_number,
+                        'employee_id'         => $loan->employee_id,
+                        'loan_type_id'        => $loan->loan_type_id,
+                        'loan_type_name'      => optional($loan->loanType)->name,
+                        'loan_amount'         => $loan->loan_amount,
+                        'loan_balance'        => $loan->loan_balance,
+                        'interest_rate'       => $loan->interest_rate,
+                        'tenure_months'       => $loan->tenure_months,
+                        'monthly_installment' => $loan->monthly_installment,
+                        'loan_status'         => $loan->loan_status,
+                        'next_due_date'       => $loan->next_due_date,
+                        'approved_amount'     => $loan->approved_amount,
+                        'approved_by'         => $loan->approved_by,
+                        'approved_at'         => $loan->approved_at,
+                        'applied_at'          => $loan->applied_at,
+                        'remarks'             => $loan->remarks,
+                        'guarantors'          => $loan->guarantors,
+                        'qualifications'      => $loan->qualifications,
+                        'created_at'          => $loan->created_at,
+                        'updated_at'          => $loan->updated_at,
+                        'loan_type'           => $loan->loanType,
+                        'employee'            => $loan->employee ? [
+                            'id'            => $loan->employee->id,
+                            'employee_id'   => $loan->employee->employee_id,
+                            'name'          => $loan->employee->first_name . ' ' . $loan->employee->last_name,
+                            'email'         => $loan->employee->email,
+                            'phone_number'  => $loan->employee->phone_number,
+                        ] : null,
+                    ];
+                });
+
+            return response()->json([
+                'draw' => (int) $draw,
+                'recordsTotal' => $totalRecords,
+                'recordsFiltered' => $filteredRecords,
+                'data' => $loans,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'draw' => (int) request()->input('draw', 1),
+                'recordsTotal' => 0,
+                'recordsFiltered' => 0,
+                'data' => [],
+                'error' => 'Exception Message: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
     public function getUserLoanStats(): array
@@ -1111,6 +1455,241 @@ class LoanService
             'amount_due' => $loan->monthly_installment,
             'balance' => $loan->loan_balance
         ]);
+    }
+
+    /**
+     * Get comprehensive loan statistics for dashboard
+     *
+     * @return array
+     */
+    public function getLoanStatistics(): array
+    {
+        try {
+            // Total loans overview
+            $totalLoans = Loan::count();
+            $activeLoans = Loan::where('loan_status', 'approved')->where('loan_balance', '>', 0)->count();
+            $pendingLoans = Loan::where('loan_status', 'pending')->count();
+            $processingLoans = Loan::where('loan_status', 'processing')->count();
+            $completedLoans = Loan::where('loan_status', 'completed')->count();
+            $rejectedLoans = Loan::where('loan_status', 'rejected')->count();
+            $canceledLoans = Loan::where('loan_status', 'canceled')->count();
+
+            // Financial overview
+            $totalDisbursed = Loan::whereIn('loan_status', ['approved', 'completed'])->sum('loan_amount');
+            $totalOutstanding = Loan::where('loan_status', 'approved')->sum('loan_balance');
+            $totalRepaid = Loan::sum('loan_amount') - Loan::sum('loan_balance');
+            $averageLoanAmount = Loan::avg('loan_amount');
+            $largestLoan = Loan::max('loan_amount');
+            $smallestLoan = Loan::where('loan_amount', '>', 0)->min('loan_amount');
+
+            // Repayment stats
+            $totalDeductions = \App\Models\LoanDeduction::count();
+            $totalDeductionAmount = \App\Models\LoanDeduction::sum('deduction_amount');
+            $totalTransactions = \App\Models\Transaction::where('payment_type', 'mpesa')->count();
+            $totalTransactionAmount = \App\Models\Transaction::where('payment_type', 'mpesa')->sum('amount');
+
+            // Loan type breakdown
+            $loanTypeStats = Loan::join('loan_types', 'loans.loan_type_id', '=', 'loan_types.id')
+                ->select('loan_types.name as loan_type', 
+                    DB::raw('count(*) as count'),
+                    DB::raw('sum(loans.loan_amount) as total_amount'),
+                    DB::raw('sum(loans.loan_balance) as outstanding'))
+                ->groupBy('loan_types.name', 'loan_types.id')
+                ->get()
+                ->map(function ($item) {
+                    return [
+                        'loan_type' => $item->loan_type,
+                        'count' => $item->count,
+                        'total_amount' => round($item->total_amount, 2),
+                        'outstanding' => round($item->outstanding, 2)
+                    ];
+                })
+                ->toArray();
+
+            // Status distribution
+            $statusDistribution = [
+                'pending' => $pendingLoans,
+                'processing' => $processingLoans,
+                'approved' => $activeLoans,
+                'completed' => $completedLoans,
+                'rejected' => $rejectedLoans,
+                'canceled' => $canceledLoans
+            ];
+
+            // Monthly trends (last 12 months)
+            $monthlyTrends = Loan::where('approved_at', '>=', now()->subMonths(12))
+                ->whereNotNull('approved_at')
+                ->select(
+                    DB::raw('DATE_FORMAT(approved_at, "%Y-%m") as month'),
+                    DB::raw('count(*) as count'),
+                    DB::raw('sum(loan_amount) as total_amount')
+                )
+                ->groupBy('month')
+                ->orderBy('month', 'desc')
+                ->limit(12)
+                ->get()
+                ->toArray();
+
+            // This month vs last month
+            $thisMonthLoans = Loan::whereYear('approved_at', now()->year)
+                ->whereMonth('approved_at', now()->month)
+                ->whereNotNull('approved_at')
+                ->count();
+            
+            $lastMonthLoans = Loan::whereYear('approved_at', now()->subMonth()->year)
+                ->whereMonth('approved_at', now()->subMonth()->month)
+                ->whereNotNull('approved_at')
+                ->count();
+
+            $loanGrowth = $lastMonthLoans > 0 
+                ? round((($thisMonthLoans - $lastMonthLoans) / $lastMonthLoans) * 100, 2)
+                : 0;
+
+            // Overdue loans
+            $overdueLoans = Loan::where('loan_status', 'approved')
+                ->where('loan_balance', '>', 0)
+                ->where('next_due_date', '<', now())
+                ->count();
+
+            $overdueTotalAmount = Loan::where('loan_status', 'approved')
+                ->where('loan_balance', '>', 0)
+                ->where('next_due_date', '<', now())
+                ->sum('loan_balance');
+
+            // Top loans by amount
+            $topLoans = Loan::with(['employee', 'loanType'])
+                ->orderBy('loan_amount', 'desc')
+                ->limit(10)
+                ->get()
+                ->map(function ($loan) {
+                    return [
+                        'id' => $loan->id,
+                        'loan_number' => $loan->loan_number,
+                        'employee_name' => $loan->employee->first_name . ' ' . $loan->employee->last_name,
+                        'employee_id' => $loan->employee->employee_id,
+                        'loan_type' => $loan->loanType->name ?? 'N/A',
+                        'loan_amount' => round($loan->loan_amount, 2),
+                        'loan_balance' => round($loan->loan_balance, 2),
+                        'loan_status' => $loan->loan_status,
+                        'approved_at' => $loan->approved_at ? $loan->approved_at->format('Y-m-d') : null
+                    ];
+                })
+                ->toArray();
+
+            // Recent loans (last 10)
+            $recentLoans = Loan::with(['employee', 'loanType'])
+                ->orderBy('created_at', 'desc')
+                ->limit(10)
+                ->get()
+                ->map(function ($loan) {
+                    return [
+                        'id' => $loan->id,
+                        'loan_number' => $loan->loan_number,
+                        'employee_name' => $loan->employee->first_name . ' ' . $loan->employee->last_name,
+                        'employee_id' => $loan->employee->employee_id,
+                        'loan_type' => $loan->loanType->name ?? 'N/A',
+                        'loan_amount' => round($loan->loan_amount, 2),
+                        'loan_status' => $loan->loan_status,
+                        'created_at' => $loan->created_at->format('Y-m-d H:i:s'),
+                        'days_ago' => $loan->created_at->diffForHumans()
+                    ];
+                })
+                ->toArray();
+
+            // Interest statistics
+            // Calculate total interest: loan_amount × (interest_rate / 100) × (tenure_months / 12)
+            // This assumes interest_rate is annual percentage
+            $totalInterest = Loan::selectRaw('SUM(loan_amount * (interest_rate / 100) * (tenure_months / 12)) as total_interest')
+                ->value('total_interest') ?? 0;
+            $averageInterestRate = Loan::avg('interest_rate');
+
+            // Performance metrics
+            $repaymentRate = $totalDisbursed > 0 
+                ? round(($totalRepaid / $totalDisbursed) * 100, 2)
+                : 0;
+
+            $defaultRate = $totalLoans > 0 
+                ? round(($overdueLoans / $totalLoans) * 100, 2)
+                : 0;
+
+            $approvalRate = ($totalLoans - $pendingLoans) > 0
+                ? round((($totalLoans - $pendingLoans - $rejectedLoans) / ($totalLoans - $pendingLoans)) * 100, 2)
+                : 0;
+
+            // Guarantor stats
+            $totalGuarantors = DB::table('loan_guarantors')->distinct('guarantor_id')->count('guarantor_id');
+            $pendingGuarantors = DB::table('loan_guarantors')->where('status', 'pending')->count();
+            $approvedGuarantors = DB::table('loan_guarantors')->where('status', 'approved')->count();
+
+            // Deduction type breakdown
+            $deductionTypeStats = \App\Models\LoanDeduction::select('deduction_type', 
+                    DB::raw('count(*) as count'),
+                    DB::raw('sum(deduction_amount) as total_amount'))
+                ->groupBy('deduction_type')
+                ->get()
+                ->pluck('count', 'deduction_type')
+                ->toArray();
+
+            return [
+                'overview' => [
+                    'total_loans' => $totalLoans,
+                    'active_loans' => $activeLoans,
+                    'pending_loans' => $pendingLoans,
+                    'processing_loans' => $processingLoans,
+                    'completed_loans' => $completedLoans,
+                    'rejected_loans' => $rejectedLoans,
+                    'canceled_loans' => $canceledLoans,
+                    'overdue_loans' => $overdueLoans,
+                ],
+                'financial' => [
+                    'total_disbursed' => round($totalDisbursed, 2),
+                    'total_outstanding' => round($totalOutstanding, 2),
+                    'total_repaid' => round($totalRepaid, 2),
+                    'average_loan_amount' => round($averageLoanAmount, 2),
+                    'largest_loan' => round($largestLoan, 2),
+                    'smallest_loan' => round($smallestLoan, 2),
+                    'total_interest' => round($totalInterest, 2),
+                    'average_interest_rate' => round($averageInterestRate, 2),
+                    'overdue_amount' => round($overdueTotalAmount, 2),
+                ],
+                'repayments' => [
+                    'total_deductions' => $totalDeductions,
+                    'total_deduction_amount' => round($totalDeductionAmount, 2),
+                    'total_mpesa_transactions' => $totalTransactions,
+                    'total_mpesa_amount' => round($totalTransactionAmount, 2),
+                    'deduction_types' => $deductionTypeStats,
+                ],
+                'loan_types' => [
+                    'breakdown' => $loanTypeStats,
+                    'total_types' => count($loanTypeStats),
+                ],
+                'status_distribution' => $statusDistribution,
+                'trends' => [
+                    'this_month' => $thisMonthLoans,
+                    'last_month' => $lastMonthLoans,
+                    'growth_percentage' => $loanGrowth,
+                    'monthly_trends' => $monthlyTrends,
+                ],
+                'performance' => [
+                    'repayment_rate' => $repaymentRate,
+                    'default_rate' => $defaultRate,
+                    'approval_rate' => $approvalRate,
+                ],
+                'guarantors' => [
+                    'total_guarantors' => $totalGuarantors,
+                    'pending_guarantors' => $pendingGuarantors,
+                    'approved_guarantors' => $approvedGuarantors,
+                ],
+                'top_loans' => $topLoans,
+                'recent_activity' => [
+                    'recent_loans' => $recentLoans,
+                ],
+                'generated_at' => now()->toDateTimeString(),
+            ];
+
+        } catch (\Exception $e) {
+            throw new \Exception('Error generating loan statistics: ' . $e->getMessage());
+        }
     }
 }
 

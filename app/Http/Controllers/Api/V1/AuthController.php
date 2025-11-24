@@ -101,30 +101,32 @@ class AuthController extends Controller
 
             $user = User::with('roles')->where('email', $request->email)->first();
 
-            if ($user->roles->contains('name', 'employee'))  {
+            // Check if user has at least one role
+            if ($user->roles->isEmpty()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Unauthorized',
-                ], 401);
+                    'message' => 'User has no assigned roles. Please contact administrator.',
+                ], 403);
             }
 
+            // Get the user's primary role (first role)
             $userRoleName = $user->roles->first()->name;
 
-            if ($userRoleName === 'employer') {
-                $user = $this->authService->loginAdmin($request->all(), $userRoleName);
-            } elseif ($userRoleName === 'super-admin') {
-                $user = $this->authService->loginSuperAdmin($request->all(), $userRoleName);
+            // Handle login based on role
+            // Allow all roles: employee, admin, super-admin, employer, etc.
+            if ($userRoleName === 'super-admin') {
+                $userData = $this->authService->loginSuperAdmin($request->all(), $userRoleName);
+            } elseif (in_array($userRoleName, ['admin', 'employer', 'employee'])) {
+                $userData = $this->authService->loginAdmin($request->all(), $userRoleName);
             } else {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Invalid role specified'
-                ], 400);
+                // For any other custom roles, use the generic admin login
+                $userData = $this->authService->loginAdmin($request->all(), $userRoleName);
             }
 
             return response()->json([
                 'success' => true,
                 'message' => 'User logged in successfully',
-                'data' => $user
+                'data' => $userData
             ], 200);
 
         } catch (\Exception $exception) {

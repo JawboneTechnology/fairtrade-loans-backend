@@ -3,7 +3,13 @@
 namespace App\Providers;
 
 use App\Events\PaymentSuccessful;
+use App\Events\DeductionProcessed;
+use App\Events\EmployeePasswordChanged;
+use App\Events\UserAccountDeleted;
 use App\Listeners\SendPaymentSuccessNotification;
+use App\Listeners\SendDeductionNotification;
+use App\Listeners\SendPasswordChangedNotification;
+use App\Listeners\SendAccountDeletionNotification;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
 
 class EventServiceProvider extends ServiceProvider
@@ -16,6 +22,15 @@ class EventServiceProvider extends ServiceProvider
     protected $listen = [
         PaymentSuccessful::class => [
             SendPaymentSuccessNotification::class,
+        ],
+        DeductionProcessed::class => [
+            SendDeductionNotification::class,
+        ],
+        EmployeePasswordChanged::class => [
+            SendPasswordChangedNotification::class,
+        ],
+        UserAccountDeleted::class => [
+            SendAccountDeletionNotification::class,
         ],
         // You can add other existing events here
         \App\Events\StkPushRequested::class => [

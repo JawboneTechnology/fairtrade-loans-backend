@@ -29,9 +29,9 @@ class CreateUserRequest extends FormRequest
             'dob' => 'required|date_format:Y-m-d',
             'gender' => 'required|string|in:male,female',
             'email' => 'required|email|unique:users',
-            'password' => 'required|string|min:6',
+            'password' => 'nullable|string|min:6',
             'salary' => 'required|numeric',
-            'role' => 'required|string|in:employer,super-admin,employee'
+            'role' => 'required|string|in:employee,super-admin,admin,manager,supervisor,hr'
         ];
     }
 }
