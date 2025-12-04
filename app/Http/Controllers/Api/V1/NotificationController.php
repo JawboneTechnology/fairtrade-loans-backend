@@ -231,6 +231,50 @@ class NotificationController extends Controller
         }
     }
 
+    /**
+     * Get all notifications for authenticated user (regular GET endpoint)
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function getNotifications(Request $request): JsonResponse
+    {
+        try {
+            $user = auth()->user();
+            $perPage = $request->input('per_page', 20);
+            $unreadOnly = $request->boolean('unread_only', false);
+
+            $query = Notification::where('user_id', $user->id)
+                ->orderBy('created_at', 'desc');
+
+            if ($unreadOnly) {
+                $query->where('is_read', false);
+            }
+
+            $notifications = $query->paginate($perPage);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Notifications fetched successfully',
+                'data' => NotificationResource::collection($notifications),
+                'meta' => [
+                    'current_page' => $notifications->currentPage(),
+                    'last_page' => $notifications->lastPage(),
+                    'per_page' => $notifications->perPage(),
+                    'total' => $notifications->total(),
+                    'unread_count' => $this->notificationService->getUnreadCount($user)
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching notifications: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'data' => []
+            ], 500);
+        }
+    }
+
     public function userNotifications(Request $request): JsonResponse
     {
         try {
@@ -267,6 +311,192 @@ class NotificationController extends Controller
                 'success' => false,
                 'message' => $e->getMessage(),
                 'data' => []
+            ], 500);
+        }
+    }
+
+    /**
+     * Get unread notifications for the authenticated user
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function getUnreadNotifications(Request $request): JsonResponse
+    {
+        try {
+            $user = auth()->user();
+            
+            $notifications = Notification::where('user_id', $user->id)
+                ->where('is_read', false)
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Unread notifications fetched successfully',
+                'data' => NotificationResource::collection($notifications),
+                'count' => $notifications->count()
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching unread notifications: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'data' => [],
+                'count' => 0
+            ], 500);
+        }
+    }
+
+    /**
+     * Get unread notification count for the authenticated user
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function getUnreadCount(Request $request): JsonResponse
+    {
+        try {
+            $user = auth()->user();
+            $count = $this->notificationService->getUnreadCount($user);
+
+            return response()->json([
+                'success' => true,
+                'count' => $count,
+                'message' => 'Unread count fetched successfully'
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching unread count: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'count' => 0,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Mark all notifications as read for the authenticated user
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function markAllAsRead(Request $request): JsonResponse
+    {
+        try {
+            $user = auth()->user();
+            $count = $this->notificationService->markAllAsRead($user);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Marked {$count} notification(s) as read",
+                'count' => 0,
+                'marked_count' => $count
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error marking all notifications as read: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'count' => 0
+            ], 500);
+        }
+    }
+
+    /**
+     * Test endpoint to create a notification for the authenticated user
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function testNotification(Request $request): JsonResponse
+    {
+        try {
+            $user = auth()->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User not authenticated'
+                ], 401);
+            }
+
+            $notification = $this->notificationService->create($user, 'test_notification', [
+                'title' => 'Test Notification',
+                'message' => 'This is a test notification to verify the notification system is working correctly.',
+                'test_data' => [
+                    'timestamp' => now()->toDateTimeString(),
+                    'user_id' => $user->id,
+                    'user_name' => $user->first_name . ' ' . $user->last_name
+                ],
+                'action_url' => config('app.url') . '/notifications'
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Test notification created and broadcasted successfully',
+                'data' => new NotificationResource($notification),
+                'unread_count' => $this->notificationService->getUnreadCount($user)
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error creating test notification: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete a notification
+     *
+     * @param Request $request
+     * @param string $notificationId
+     * @return JsonResponse
+     */
+    public function delete(Request $request, string $notificationId): JsonResponse
+    {
+        try {
+            $user = auth()->user();
+            $notification = Notification::findOrFail($notificationId);
+
+            if (!$notification) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Notification not found.',
+                    'data' => null
+                ], 404);
+            }
+
+            // Check if user owns this notification
+            if ($notification->user_id !== $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized to delete this notification.',
+                    'data' => null
+                ], 403);
+            }
+
+            $this->notificationService->delete($notification);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Notification deleted successfully',
+                'data' => null
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Notification not found.',
+                'data' => null
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Error deleting notification: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'data' => null
             ], 500);
         }
     }

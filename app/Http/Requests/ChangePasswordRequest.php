@@ -22,9 +22,26 @@ class ChangePasswordRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'old_password' => 'required',
-            'password' => 'required',
-            'otp_code' => 'required',
+            'old_password' => 'required|string',
+            'password' => 'required|string|min:8',
+            'confirm_password' => 'required|string|min:8|same:password',
+        ];
+    }
+
+    /**
+     * Get custom messages for validator errors.
+     *
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'old_password.required' => 'The old password is required.',
+            'password.required' => 'The new password is required.',
+            'password.min' => 'The new password must be at least 8 characters.',
+            'confirm_password.required' => 'The password confirmation is required.',
+            'confirm_password.min' => 'The password confirmation must be at least 8 characters.',
+            'confirm_password.same' => 'The password confirmation does not match the new password.',
         ];
     }
 }

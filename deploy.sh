@@ -40,6 +40,70 @@ check_supervisor() {
     fi
 }
 
+# Function to check Reverb server status
+check_reverb() {
+    if command_exists supervisorctl; then
+        log "Checking Reverb server status..."
+        if sudo supervisorctl status | grep -q reverb; then
+            sudo supervisorctl status | grep reverb
+        else
+            log "Reverb server not found in supervisor"
+        fi
+    else
+        log "Checking if Reverb process is running..."
+        if pgrep -f "php artisan reverb:start" > /dev/null; then
+            log "Reverb server is running (detected via process)"
+        else
+            log "Reverb server is not running"
+        fi
+    fi
+}
+
+# Function to restart Reverb server
+restart_reverb() {
+    log "Restarting Reverb WebSocket server..."
+    
+    if command_exists supervisorctl; then
+        # Check if Reverb is managed by supervisor
+        if sudo supervisorctl status | grep -q reverb; then
+            log "Stopping Reverb server via supervisor..."
+            sudo supervisorctl stop reverb:*
+            
+            # Wait a moment
+            sleep 2
+            
+            # Start Reverb server
+            log "Starting Reverb server via supervisor..."
+            sudo supervisorctl start reverb:*
+            
+            # Check status
+            log "Checking Reverb server status..."
+            sudo supervisorctl status reverb:*
+        else
+            log "Reverb not managed by supervisor, attempting to restart via systemd..."
+            if systemctl is-active --quiet reverb.service 2>/dev/null; then
+                sudo systemctl restart reverb.service
+                log "Reverb server restarted via systemd"
+            else
+                log "Reverb not found in systemd, attempting manual restart..."
+                # Kill existing Reverb processes
+                pkill -f "php artisan reverb:start" || true
+                sleep 1
+                # Note: Reverb should be started via supervisor or systemd service
+                log "WARNING: Reverb should be managed by supervisor or systemd for production"
+            fi
+        fi
+    else
+        log "Supervisor not available, checking systemd..."
+        if systemctl is-active --quiet reverb.service 2>/dev/null; then
+            sudo systemctl restart reverb.service
+            log "Reverb server restarted via systemd"
+        else
+            log "Reverb service not found. Please configure Reverb to run via supervisor or systemd"
+        fi
+    fi
+}
+
 # Function to setup git safe directory
 setup_git_safe_directory() {
     log "Setting up Git safe directory..."
@@ -196,6 +260,9 @@ else
     php artisan queue:restart
 fi
 
+# Restart Reverb WebSocket server
+restart_reverb
+
 # Restart PHP-FPM and Nginx
 log "Restarting PHP-FPM and Nginx..."
 sudo systemctl restart php8.3-fpm
@@ -214,6 +281,9 @@ log "Deployment completed successfully!"
 log "Checking supervisor status..."
 check_supervisor
 
+log "Checking Reverb server status..."
+check_reverb
+
 log "Checking application status..."
 curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" https://fairtradeapi.jawbonetechnology.co.ke || log "Could not check application status"
 
@@ -230,8 +300,22 @@ echo "✓ Permissions fixed"
 echo "✓ Database migrations run"
 echo "✓ Caches cleared and rebuilt"
 echo "✓ Queue workers restarted"
+echo "✓ Reverb WebSocket server restarted"
 echo "✓ Services restarted"
 echo "✓ Application online"
 echo "======================================"
 echo "Deployment completed at: $(date)"
 echo "======================================"
+
+exit 0
+
+# Reverb server restart command
+
+# [program:reverb]
+# process_name=%(program_name)s
+# command=php /var/www/html/fairtrade-loans-backend/artisan reverb:start
+# autostart=true
+# autorestart=true
+# user=www-data
+# redirect_stderr=true
+# stdout_logfile=/var/www/html/fairtrade-loans-backend/storage/logs/reverb.log

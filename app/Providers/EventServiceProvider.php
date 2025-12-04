@@ -6,10 +6,18 @@ use App\Events\PaymentSuccessful;
 use App\Events\DeductionProcessed;
 use App\Events\EmployeePasswordChanged;
 use App\Events\UserAccountDeleted;
+use App\Events\LoanApproved;
+use App\Events\LoanRejected;
+use App\Events\GrantApproved;
+use App\Events\GrantRejected;
 use App\Listeners\SendPaymentSuccessNotification;
 use App\Listeners\SendDeductionNotification;
 use App\Listeners\SendPasswordChangedNotification;
 use App\Listeners\SendAccountDeletionNotification;
+use App\Listeners\NotifyApplicantLoanApproved;
+use App\Listeners\NotifyApplicantLoanRejected;
+use App\Listeners\NotifyApplicantGrantApproved;
+use App\Listeners\NotifyApplicantGrantRejected;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
 
 class EventServiceProvider extends ServiceProvider
@@ -31,6 +39,18 @@ class EventServiceProvider extends ServiceProvider
         ],
         UserAccountDeleted::class => [
             SendAccountDeletionNotification::class,
+        ],
+        LoanApproved::class => [
+            NotifyApplicantLoanApproved::class,
+        ],
+        LoanRejected::class => [
+            NotifyApplicantLoanRejected::class,
+        ],
+        GrantApproved::class => [
+            NotifyApplicantGrantApproved::class,
+        ],
+        GrantRejected::class => [
+            NotifyApplicantGrantRejected::class,
         ],
         // You can add other existing events here
         \App\Events\StkPushRequested::class => [

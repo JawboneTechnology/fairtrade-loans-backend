@@ -24,6 +24,7 @@ use App\Http\Requests\AdminRegisterRequest;
 use App\Http\Requests\PasswordResetRequest;
 use App\Http\Requests\VerifyAccountRequest;
 use App\Http\Requests\ChangePasswordRequest;
+use App\Http\Requests\UpdateProfileRequest;
 use App\Http\Requests\ExternalRegisterRequest;
 use App\Http\Requests\PasswordResetCodeRequest;
 
@@ -144,6 +145,67 @@ class AuthController extends Controller
             return response()->json([ 'success' => true, 'message' => 'User profile retrieved successfully', 'data' => $user ], 200);
         } catch (\Exception $exception) {
             return response()->json([ 'success' => false, 'message' => 'An error occurred. Please try again', 'error' => $exception->getMessage() ], 500);
+        }
+    }
+
+    /**
+     * Update authenticated user's profile
+     *
+     * @param UpdateProfileRequest $request
+     * @return JsonResponse
+     */
+    public function updateProfile(UpdateProfileRequest $request): JsonResponse
+    {
+        try {
+            $user = auth()->user();
+
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User not authenticated.',
+                    'data' => null
+                ], 401);
+            }
+
+            // Get only the validated and allowed fields
+            $updateData = $request->only([
+                'first_name',
+                'middle_name',
+                'last_name',
+                'email',
+                'phone_number',
+                'address',
+                'dob',
+                'gender',
+                'national_id',
+                'passport_image'
+            ]);
+
+            // Remove null values to avoid overwriting with null
+            $updateData = array_filter($updateData, function ($value) {
+                return $value !== null;
+            });
+
+            // Update user profile
+            $user->update($updateData);
+
+            // Refresh user to get updated data
+            $user->refresh();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Profile updated successfully',
+                'data' => new UserResource($user)
+            ], 200);
+        } catch (\Exception $exception) {
+            Log::error('Error updating profile: ' . $exception->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $exception->getTraceAsString());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while updating profile. Please try again.',
+                'error' => $exception->getMessage()
+            ], 500);
         }
     }
 
@@ -316,19 +378,55 @@ class AuthController extends Controller
     public function changePasswordInternal(ChangePasswordRequest $request): JsonResponse
     {
         try {
-            $authUser = auth()->user();
+            $user = auth()->user();
 
-            $user = User::findOrFail($authUser->id);
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User not authenticated.',
+                    'data' => null
+                ], 401);
+            }
 
-            $this->authService->changeUserPassword($user, $request->all());
+            // Verify old password
+            if (!\Illuminate\Support\Facades\Hash::check($request->old_password, $user->password)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'The old password is incorrect.',
+                    'data' => null
+                ], 422);
+            }
+
+            // Check if new password is different from old password
+            if (\Illuminate\Support\Facades\Hash::check($request->password, $user->password)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'The new password must be different from the old password.',
+                    'data' => null
+                ], 422);
+            }
+
+            // Update password
+            $user->password = \Illuminate\Support\Facades\Hash::make($request->password);
+            $user->save();
+
+            // Invalidate current token
+            $request->user()->currentAccessToken()->delete();
 
             return response()->json([
                 'success' => true,
-                'message' => 'Password changed successfully',
+                'message' => 'Password changed successfully. Please login again with your new password.',
                 'data' => null
             ], 200);
         } catch (\Exception $exception) {
-            return response()->json([ 'success' => false, 'message' => $exception->getMessage(), 'data' => null ], 500);
+            Log::error('Error changing password: ' . $exception->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $exception->getTraceAsString());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while changing password. Please try again.',
+                'data' => null
+            ], 500);
         }
     }
 

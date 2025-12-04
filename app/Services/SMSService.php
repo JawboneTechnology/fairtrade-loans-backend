@@ -7,6 +7,7 @@ use App\Jobs\SendSMSJob;
 use App\Models\SmsMessage;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use AfricasTalking\SDK\AfricasTalking;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -205,5 +206,246 @@ class SMSService
         }
 
         return ['raw' => $result];
+    }
+
+    /**
+     * Get comprehensive SMS statistics for dashboard
+     *
+     * @return array
+     */
+    public function getSMSStatistics(): array
+    {
+        try {
+            // Total SMS overview
+            $totalSMS = SmsMessage::count();
+            $sentSMS = SmsMessage::where('status', 'sent')->count();
+            $failedSMS = SmsMessage::where('status', 'failed')->count();
+            $pendingSMS = SmsMessage::where('status', 'pending')->count();
+            $queuedSMS = SmsMessage::where('status', 'queued')->count();
+
+            // Success rate
+            $successRate = $totalSMS > 0 
+                ? round(($sentSMS / $totalSMS) * 100, 2)
+                : 0;
+
+            $failureRate = $totalSMS > 0
+                ? round(($failedSMS / $totalSMS) * 100, 2)
+                : 0;
+
+            // Status distribution
+            $statusDistribution = [
+                'sent' => $sentSMS,
+                'failed' => $failedSMS,
+                'pending' => $pendingSMS,
+                'queued' => $queuedSMS,
+            ];
+
+            // Monthly trends (last 12 months)
+            $monthlyTrends = SmsMessage::where('created_at', '>=', now()->subMonths(12))
+                ->select(
+                    DB::raw('DATE_FORMAT(created_at, "%Y-%m") as month'),
+                    DB::raw('count(*) as count'),
+                    DB::raw('sum(CASE WHEN status = "sent" THEN 1 ELSE 0 END) as sent_count'),
+                    DB::raw('sum(CASE WHEN status = "failed" THEN 1 ELSE 0 END) as failed_count')
+                )
+                ->groupBy('month')
+                ->orderBy('month', 'desc')
+                ->limit(12)
+                ->get()
+                ->toArray();
+
+            // This month vs last month
+            $thisMonthSMS = SmsMessage::whereYear('created_at', now()->year)
+                ->whereMonth('created_at', now()->month)
+                ->count();
+
+            $lastMonthSMS = SmsMessage::whereYear('created_at', now()->subMonth()->year)
+                ->whereMonth('created_at', now()->subMonth()->month)
+                ->count();
+
+            $smsGrowth = $lastMonthSMS > 0
+                ? round((($thisMonthSMS - $lastMonthSMS) / $lastMonthSMS) * 100, 2)
+                : 0;
+
+            // Today's statistics
+            $todaySMS = SmsMessage::whereDate('created_at', now()->toDateString())->count();
+            $todaySent = SmsMessage::whereDate('created_at', now()->toDateString())
+                ->where('status', 'sent')
+                ->count();
+            $todayFailed = SmsMessage::whereDate('created_at', now()->toDateString())
+                ->where('status', 'failed')
+                ->count();
+
+            // This week's statistics
+            $thisWeekSMS = SmsMessage::where('created_at', '>=', now()->startOfWeek())->count();
+            $thisWeekSent = SmsMessage::where('created_at', '>=', now()->startOfWeek())
+                ->where('status', 'sent')
+                ->count();
+
+            // Top senders (users who sent the most SMS)
+            $topSenders = SmsMessage::select('sent_by', DB::raw('count(*) as sms_count'))
+                ->whereNotNull('sent_by')
+                ->groupBy('sent_by')
+                ->orderBy('sms_count', 'desc')
+                ->limit(10)
+                ->get()
+                ->map(function ($item) {
+                    $user = \App\Models\User::find($item->sent_by);
+                    return [
+                        'user_id' => $item->sent_by,
+                        'user_name' => $user ? trim($user->first_name . ' ' . ($user->middle_name ?? '') . ' ' . $user->last_name) : 'Unknown',
+                        'email' => $user->email ?? null,
+                        'employee_id' => $user->employee_id ?? null,
+                        'sms_count' => $item->sms_count,
+                    ];
+                })
+                ->toArray();
+
+            // Recent SMS activity (last 20)
+            $recentSMS = SmsMessage::with(['sender:id,first_name,last_name,email'])
+                ->orderBy('created_at', 'desc')
+                ->limit(20)
+                ->get()
+                ->map(function ($sms) {
+                    return [
+                        'id' => $sms->id,
+                        'recipient' => $sms->recipient,
+                        'message_preview' => \Illuminate\Support\Str::limit($sms->message, 50),
+                        'message_length' => strlen($sms->message),
+                        'status' => $sms->status,
+                        'sender' => $sms->sender ? [
+                            'id' => $sms->sender->id,
+                            'name' => $sms->sender->first_name . ' ' . $sms->sender->last_name,
+                            'email' => $sms->sender->email,
+                        ] : ['name' => 'System'],
+                        'created_at' => $sms->created_at->format('Y-m-d H:i:s'),
+                        'created_at_formatted' => $sms->created_at->format('d M Y, h:i A'),
+                        'days_ago' => $sms->created_at->diffForHumans(),
+                    ];
+                })
+                ->toArray();
+
+            // Message length statistics
+            $messageLengthStats = SmsMessage::selectRaw('
+                AVG(LENGTH(message)) as avg_length,
+                MIN(LENGTH(message)) as min_length,
+                MAX(LENGTH(message)) as max_length,
+                COUNT(*) as total_messages
+            ')->first();
+
+            // Provider response analysis
+            $providerSuccessCount = SmsMessage::where('status', 'sent')
+                ->whereNotNull('provider_response')
+                ->count();
+
+            $providerFailureCount = SmsMessage::where('status', 'failed')
+                ->whereNotNull('provider_response')
+                ->count();
+
+            // Hourly distribution (last 24 hours)
+            $hourlyDistribution = SmsMessage::where('created_at', '>=', now()->subDay())
+                ->select(
+                    DB::raw('HOUR(created_at) as hour'),
+                    DB::raw('count(*) as count'),
+                    DB::raw('sum(CASE WHEN status = "sent" THEN 1 ELSE 0 END) as sent_count')
+                )
+                ->groupBy('hour')
+                ->orderBy('hour')
+                ->get()
+                ->map(function ($item) {
+                    return [
+                        'hour' => $item->hour,
+                        'hour_formatted' => sprintf('%02d:00', $item->hour),
+                        'count' => $item->count,
+                        'sent_count' => $item->sent_count,
+                    ];
+                })
+                ->toArray();
+
+            // Daily statistics (last 30 days)
+            $dailyStats = SmsMessage::where('created_at', '>=', now()->subDays(30))
+                ->select(
+                    DB::raw('DATE(created_at) as date'),
+                    DB::raw('count(*) as count'),
+                    DB::raw('sum(CASE WHEN status = "sent" THEN 1 ELSE 0 END) as sent_count'),
+                    DB::raw('sum(CASE WHEN status = "failed" THEN 1 ELSE 0 END) as failed_count')
+                )
+                ->groupBy('date')
+                ->orderBy('date', 'desc')
+                ->limit(30)
+                ->get()
+                ->toArray();
+
+            // Unique recipients count
+            $uniqueRecipients = SmsMessage::distinct('recipient')->count('recipient');
+
+            // Most contacted recipients
+            $topRecipients = SmsMessage::select('recipient', DB::raw('count(*) as sms_count'))
+                ->groupBy('recipient')
+                ->orderBy('sms_count', 'desc')
+                ->limit(10)
+                ->get()
+                ->map(function ($item) {
+                    return [
+                        'recipient' => $item->recipient,
+                        'sms_count' => $item->sms_count,
+                    ];
+                })
+                ->toArray();
+
+            return [
+                'overview' => [
+                    'total_sms' => $totalSMS,
+                    'sent_sms' => $sentSMS,
+                    'failed_sms' => $failedSMS,
+                    'pending_sms' => $pendingSMS,
+                    'queued_sms' => $queuedSMS,
+                    'unique_recipients' => $uniqueRecipients,
+                ],
+                'performance' => [
+                    'success_rate' => $successRate,
+                    'failure_rate' => $failureRate,
+                    'provider_success_count' => $providerSuccessCount,
+                    'provider_failure_count' => $providerFailureCount,
+                ],
+                'status_distribution' => $statusDistribution,
+                'trends' => [
+                    'this_month' => $thisMonthSMS,
+                    'last_month' => $lastMonthSMS,
+                    'growth_percentage' => $smsGrowth,
+                    'monthly_trends' => $monthlyTrends,
+                    'daily_stats' => $dailyStats,
+                ],
+                'time_periods' => [
+                    'today' => [
+                        'total' => $todaySMS,
+                        'sent' => $todaySent,
+                        'failed' => $todayFailed,
+                    ],
+                    'this_week' => [
+                        'total' => $thisWeekSMS,
+                        'sent' => $thisWeekSent,
+                    ],
+                ],
+                'message_statistics' => [
+                    'average_length' => round($messageLengthStats->avg_length ?? 0, 2),
+                    'min_length' => $messageLengthStats->min_length ?? 0,
+                    'max_length' => $messageLengthStats->max_length ?? 0,
+                    'total_messages' => $messageLengthStats->total_messages ?? 0,
+                ],
+                'top_senders' => $topSenders,
+                'top_recipients' => $topRecipients,
+                'hourly_distribution' => $hourlyDistribution,
+                'recent_activity' => [
+                    'recent_sms' => $recentSMS,
+                ],
+                'generated_at' => now()->toDateTimeString(),
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('Error generating SMS statistics: ' . $e->getMessage());
+            Log::error($e->getTraceAsString());
+            throw new \Exception('Error generating SMS statistics: ' . $e->getMessage());
+        }
     }
 }

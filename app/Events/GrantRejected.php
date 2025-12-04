@@ -3,16 +3,16 @@
 namespace App\Events;
 
 use App\Models\Grant;
-use Illuminate\Queue\SerializesModels;
-use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Broadcasting\InteractsWithSockets;
+use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
 
-class GrantApproved
+class GrantRejected
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
-    public Grant $grant;
-    public ?string $adminNotes;
+    public $grant;
+    public $adminNotes;
 
     /**
      * Create a new event instance.
@@ -23,3 +23,4 @@ class GrantApproved
         $this->adminNotes = $adminNotes;
     }
 }
+

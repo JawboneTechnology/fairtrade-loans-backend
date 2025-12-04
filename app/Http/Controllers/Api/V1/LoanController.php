@@ -416,6 +416,33 @@ class LoanController extends Controller
     }
 
     /**
+     * Get comprehensive loan details for administrators
+     * Returns all loan information including employee, loan type, approver, 
+     * guarantors, transactions, deductions, and payment statistics
+     */
+    public function getAdminLoanDetails($loanId): JsonResponse
+    {
+        try {
+            $data = $this->loanService->getAdminLoanDetails($loanId);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Comprehensive loan details retrieved successfully.',
+                'data' => $data,
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error getting admin loan details: ' . $e->getMessage());
+            Log::error($e->getTraceAsString());
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'data' => null
+            ], $e->getMessage() === 'Loan not found.' ? 404 : 500);
+        }
+    }
+
+    /**
      * Get Employee Loans
      * Returns simplified loan information for an employee
      */
@@ -1086,6 +1113,182 @@ class LoanController extends Controller
 
         } catch (\Exception $e) {
             Log::error('=== ERROR FETCHING USER TRANSACTIONS FOR DATATABLES ===');
+            Log::error('Error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
+
+            return response()->json([
+                'draw' => intval($request->input('draw', 1)),
+                'recordsTotal' => 0,
+                'recordsFiltered' => 0,
+                'data' => [],
+                'success' => false,
+                'error' => 'Failed to fetch transactions: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get All Transactions for DataTables (Admin Dashboard)
+     * Supports server-side processing with pagination, searching, and sorting
+     * This endpoint returns ALL transactions (not filtered by employeeId)
+     */
+    public function getTransactionsForDataTables(Request $request): JsonResponse
+    {
+        try {
+            // DataTables parameters
+            $draw = $request->input('draw', 1);
+            $start = $request->input('start', 0);
+            $length = $request->input('length', 10);
+            $searchValue = $request->input('search.value', '');
+            $orderColumnIndex = $request->input('order.0.column', 0);
+            $orderDirection = $request->input('order.0.dir', 'desc');
+            
+            // Additional filters
+            $loanId = $request->input('loan_id');
+            $employeeId = $request->input('employee_id'); // Optional filter
+            $paymentType = $request->input('payment_type'); // Mobile_Money, Bank_Transfer, etc.
+            $dateFrom = $request->input('date_from');
+            $dateTo = $request->input('date_to');
+            $minAmount = $request->input('min_amount');
+            $maxAmount = $request->input('max_amount');
+
+            // Column mapping for sorting
+            $columns = [
+                0 => 'id',
+                1 => 'transaction_reference',
+                2 => 'employee_id',
+                3 => 'loan_id',
+                4 => 'amount',
+                5 => 'payment_type',
+                6 => 'transaction_date',
+                7 => 'created_at'
+            ];
+            
+            $orderColumn = $columns[$orderColumnIndex] ?? 'created_at';
+
+            // Base query with relationships
+            $query = \App\Models\Transaction::with([
+                    'loan:id,loan_number,loan_amount,loan_balance,loan_status',
+                    'employee:id,first_name,last_name,email,phone_number,employee_id'
+                ])
+                ->select([
+                    'id',
+                    'loan_id',
+                    'employee_id',
+                    'amount',
+                    'payment_type',
+                    'transaction_reference',
+                    'transaction_date',
+                    'created_at',
+                    'updated_at'
+                ]);
+
+            // Apply loan_id filter
+            if ($loanId) {
+                $query->where('loan_id', $loanId);
+            }
+
+            // Apply employee_id filter (optional)
+            if ($employeeId) {
+                $query->where('employee_id', $employeeId);
+            }
+
+            // Apply payment_type filter
+            if ($paymentType) {
+                $query->where('payment_type', $paymentType);
+            }
+
+            // Apply date range filter
+            if ($dateFrom) {
+                $query->whereDate('transaction_date', '>=', $dateFrom);
+            }
+            if ($dateTo) {
+                $query->whereDate('transaction_date', '<=', $dateTo);
+            }
+
+            // Apply amount range filter
+            if ($minAmount) {
+                $query->where('amount', '>=', $minAmount);
+            }
+            if ($maxAmount) {
+                $query->where('amount', '<=', $maxAmount);
+            }
+
+            // Get total records before filtering
+            $recordsTotal = \App\Models\Transaction::count();
+
+            // Apply search filter
+            if ($searchValue) {
+                $query->where(function ($q) use ($searchValue) {
+                    $q->where('transaction_reference', 'like', "%{$searchValue}%")
+                      ->orWhere('amount', 'like', "%{$searchValue}%")
+                      ->orWhere('payment_type', 'like', "%{$searchValue}%")
+                      ->orWhere('id', 'like', "%{$searchValue}%")
+                      ->orWhereHas('employee', function ($q) use ($searchValue) {
+                          $q->where('first_name', 'like', "%{$searchValue}%")
+                            ->orWhere('last_name', 'like', "%{$searchValue}%")
+                            ->orWhere('email', 'like', "%{$searchValue}%")
+                            ->orWhere('employee_id', 'like', "%{$searchValue}%");
+                      })
+                      ->orWhereHas('loan', function ($q) use ($searchValue) {
+                          $q->where('loan_number', 'like', "%{$searchValue}%");
+                      });
+                });
+            }
+
+            // Get filtered count
+            $recordsFiltered = $query->count();
+
+            // Apply sorting
+            $query->orderBy($orderColumn, $orderDirection);
+
+            // Apply pagination
+            $transactions = $query->skip($start)->take($length)->get();
+
+            // Format data for DataTables
+            $data = $transactions->map(function ($transaction) {
+                return [
+                    'id' => $transaction->id,
+                    'transaction_reference' => $transaction->transaction_reference ?? 'N/A',
+                    'loan_id' => $transaction->loan_id,
+                    'loan' => $transaction->loan ? [
+                        'id' => $transaction->loan->id,
+                        'loan_number' => $transaction->loan->loan_number,
+                        'loan_amount' => number_format($transaction->loan->loan_amount, 2),
+                        'loan_balance' => number_format($transaction->loan->loan_balance, 2),
+                        'loan_status' => $transaction->loan->loan_status,
+                    ] : null,
+                    'employee_id' => $transaction->employee_id,
+                    'employee' => $transaction->employee ? [
+                        'id' => $transaction->employee->id,
+                        'name' => $transaction->employee->first_name . ' ' . $transaction->employee->last_name,
+                        'email' => $transaction->employee->email,
+                        'phone_number' => $transaction->employee->phone_number,
+                        'employee_id' => $transaction->employee->employee_id,
+                    ] : null,
+                    'amount' => number_format($transaction->amount, 2),
+                    'amount_raw' => $transaction->amount,
+                    'payment_type' => $transaction->payment_type,
+                    'payment_type_badge' => $this->getPaymentTypeBadge($transaction->payment_type),
+                    'transaction_date' => $transaction->transaction_date ? date('Y-m-d H:i:s', strtotime($transaction->transaction_date)) : null,
+                    'transaction_date_formatted' => $transaction->transaction_date ? date('d M Y, h:i A', strtotime($transaction->transaction_date)) : 'N/A',
+                    'created_at' => $transaction->created_at->format('Y-m-d H:i:s'),
+                    'created_at_formatted' => $transaction->created_at->format('d M Y, h:i A'),
+                    'updated_at' => $transaction->updated_at->format('Y-m-d H:i:s'),
+                ];
+            });
+
+            // DataTables response format
+            return response()->json([
+                'draw' => intval($draw),
+                'recordsTotal' => $recordsTotal,
+                'recordsFiltered' => $recordsFiltered,
+                'data' => $data,
+                'success' => true
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('=== ERROR FETCHING TRANSACTIONS FOR DATATABLES ===');
             Log::error('Error: ' . $e->getMessage());
             Log::error('Stack trace: ' . PHP_EOL . $e->getTraceAsString());
 

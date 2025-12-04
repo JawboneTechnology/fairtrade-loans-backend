@@ -193,4 +193,61 @@ class GrantController extends Controller
             ]);
         }
     }
+
+    /**
+     * Get grant statistics for dashboard
+     *
+     * @return JsonResponse
+     */
+    public function getGrantStatistics(): JsonResponse
+    {
+        try {
+            $statistics = $this->grantService->getGrantStatistics();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Grant statistics retrieved successfully.',
+                'data' => $statistics
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Failed to retrieve grant statistics: ' . $e->getMessage());
+            \Illuminate\Support\Facades\Log::error($e->getTraceAsString());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve grant statistics: ' . $e->getMessage(),
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Get comprehensive grant details for administrators
+     * Returns all grant information including user, dependent, grant type, timeline, and user context
+     *
+     * @param string $grantId
+     * @return JsonResponse
+     */
+    public function getAdminGrantDetails(string $grantId): JsonResponse
+    {
+        try {
+            $data = $this->grantService->getAdminGrantDetails($grantId);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Comprehensive grant details retrieved successfully.',
+                'data' => $data,
+            ], 200);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error getting admin grant details: ' . $e->getMessage());
+            \Illuminate\Support\Facades\Log::error($e->getTraceAsString());
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'data' => null
+            ], $e->getMessage() === 'Grant not found.' ? 404 : 500);
+        }
+    }
 }

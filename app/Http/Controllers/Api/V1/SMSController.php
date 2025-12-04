@@ -305,4 +305,32 @@ class SMSController extends Controller
 
         return data_get($providerResponse, 'status', null);
     }
+
+    /**
+     * Get SMS statistics for dashboard
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getSMSStatistics(): \Illuminate\Http\JsonResponse
+    {
+        try {
+            $statistics = $this->smsService->getSMSStatistics();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'SMS statistics retrieved successfully.',
+                'data' => $statistics
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Failed to retrieve SMS statistics: ' . $e->getMessage());
+            \Illuminate\Support\Facades\Log::error($e->getTraceAsString());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve SMS statistics: ' . $e->getMessage(),
+                'data' => null
+            ], 500);
+        }
+    }
 }

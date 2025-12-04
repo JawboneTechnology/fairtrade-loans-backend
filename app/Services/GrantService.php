@@ -155,4 +155,31 @@ class GrantService
             return $this->grantRepository->changeGrantStatus($grantId, 'paid');
         }, "Error marking grant as paid");
     }
+
+    /**
+     * Get comprehensive grant statistics for dashboard
+     *
+     * @return array
+     * @throws \Exception
+     */
+    public function getGrantStatistics(): array
+    {
+        return ValidationCallbackHelper::executeWithExceptionHandling(function () {
+            return $this->grantRepository->getGrantStatistics();
+        }, "Error getting grant statistics");
+    }
+
+    /**
+     * Get comprehensive grant details for administrators
+     *
+     * @param string $grantId
+     * @return array
+     * @throws \Exception
+     */
+    public function getAdminGrantDetails(string $grantId): array
+    {
+        return ValidationCallbackHelper::executeWithExceptionHandling(function () use ($grantId) {
+            return $this->grantRepository->getAdminGrantDetails($grantId);
+        }, "Error getting admin grant details");
+    }
 }

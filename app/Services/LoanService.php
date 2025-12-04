@@ -6,6 +6,8 @@ use Carbon\Carbon;
 use App\Models\Loan;
 use App\Models\User;
 use App\Events\LoanPaid;
+use App\Events\LoanApproved;
+use App\Events\LoanRejected;
 use App\Jobs\SendSMSJob;
 use App\Models\LoanType;
 use App\Models\LoanLimit;
@@ -415,33 +417,19 @@ class LoanService
         $employee->loan_limit -= $data['approved_amount'];
         $employee->save();
 
-
-        // Dispatch a job to send SMS notification to the employee
+        // Dispatch LoanApproved event - listener will handle SMS notification
         try {
-            $recipientPhone = $employee->phone_number ?? null;
-
-            if (!empty($recipientPhone)) {
-                $message = "Dear {$employee->first_name}, your loan application (Loan No: {$loan->loan_number}) has been approved for KES " . number_format($data['approved_amount'], 2) . ". You will receive a notification once the money has been sent to your M-Pesa number.";
-
-                Log::info('Dispatching SendSMSJob for loan approval', ['phone' => $recipientPhone, 'loan_id' => $loan->id]);
-
-                // Queue the SMS job on the sms queue
-                SendSMSJob::dispatch($recipientPhone, $message, $employee->id)->onQueue('sms');
-
-                // Optional synchronous fallback for debugging
-                if (env('FORCE_SEND_SMS_SYNC', false)) {
-                    try {
-                        app(\App\Services\SMSService::class)->sendSMS($recipientPhone, $message);
-                        Log::info('Synchronous loan approval SMS sent (FORCE_SEND_SMS_SYNC enabled)', ['phone' => $recipientPhone]);
-                    } catch (\Throwable $ex) {
-                        Log::error('Synchronous loan approval SMS failed', ['error' => $ex->getMessage()]);
-                    }
-                }
-            } else {
-                Log::warning('Loan approval SMS not sent: no phone number for employee', ['loan_id' => $loan->id, 'employee_id' => $employee->id ?? null]);
-            }
+            LoanApproved::dispatch($loan, $data['approved_amount'], $data['remarks'] ?? null);
+            Log::info('LoanApproved event dispatched', [
+                'loan_id' => $loan->id,
+                'loan_number' => $loan->loan_number,
+                'approved_amount' => $data['approved_amount']
+            ]);
         } catch (\Exception $e) {
-            Log::error('Failed to dispatch loan approval SMS: ' . $e->getMessage(), ['loan_id' => $loan->id]);
+            Log::error('Failed to dispatch LoanApproved event: ' . $e->getMessage(), [
+                'loan_id' => $loan->id,
+                'error' => $e->getMessage()
+            ]);
         }
     }
 
@@ -461,31 +449,18 @@ class LoanService
             Log::error('Failed to dispatch NotifyApplicantLoanCanceled job: ' . $e->getMessage(), ['loan_id' => $loan->id]);
         }
 
-        // Send SMS to the employee informing them of rejection
+        // Dispatch LoanRejected event - listener will handle SMS notification
         try {
-            $employee = $loan->employee;
-            $recipientPhone = $employee->phone_number ?? null;
-
-            if (!empty($recipientPhone)) {
-                $message = "Dear {$employee->first_name}, your loan application (Loan No: {$loan->loan_number}) has been rejected. Remarks: " . ($data['remarks'] ?? 'No remarks provided') . ".";
-
-                Log::info('Dispatching SendSMSJob for loan rejection', ['phone' => $recipientPhone, 'loan_id' => $loan->id]);
-                SendSMSJob::dispatch($recipientPhone, $message, $employee->id)->onQueue('sms');
-
-                // Optional synchronous fallback for debugging
-                if (env('FORCE_SEND_SMS_SYNC', false)) {
-                    try {
-                        app(\App\Services\SMSService::class)->sendSMS($recipientPhone, $message);
-                        Log::info('Synchronous loan rejection SMS sent (FORCE_SEND_SMS_SYNC enabled)', ['phone' => $recipientPhone]);
-                    } catch (\Throwable $ex) {
-                        Log::error('Synchronous loan rejection SMS failed', ['error' => $ex->getMessage()]);
-                    }
-                }
-            } else {
-                Log::warning('Loan rejection SMS not sent: no phone number for employee', ['loan_id' => $loan->id, 'employee_id' => $employee->id ?? null]);
-            }
+            LoanRejected::dispatch($loan, $data['remarks'] ?? null);
+            Log::info('LoanRejected event dispatched', [
+                'loan_id' => $loan->id,
+                'loan_number' => $loan->loan_number
+            ]);
         } catch (\Exception $e) {
-            Log::error('Failed to dispatch loan rejection SMS: ' . $e->getMessage(), ['loan_id' => $loan->id]);
+            Log::error('Failed to dispatch LoanRejected event: ' . $e->getMessage(), [
+                'loan_id' => $loan->id,
+                'error' => $e->getMessage()
+            ]);
         }
     }
 
@@ -564,6 +539,197 @@ class LoanService
             ];
         } catch (\Exception $e) {
             Log::error("Error getting user loan details: {$e->getMessage()}");
+            throw $e;
+        }
+    }
+
+    /**
+     * Get comprehensive loan details for administrators
+     * Includes all related data: employee, loan type, approver, guarantors, transactions, deductions, and statistics
+     */
+    public function getAdminLoanDetails(string $loanId): array
+    {
+        try {
+            $loan = Loan::with([
+                'employee:id,first_name,middle_name,last_name,email,phone_number,employee_id,old_employee_id,salary,loan_limit,passport_image,created_at',
+                'loanType:id,name,interest_rate,approval_type,requires_guarantors,required_guarantors_count,type,payment_type',
+                'approver:id,first_name,middle_name,last_name,email,employee_id',
+                'guarantors.user:id,first_name,middle_name,last_name,email,phone_number,employee_id,old_employee_id,passport_image',
+            ])->findOrFail($loanId);
+
+            // Get all guarantors with full details
+            $guarantors = Guarantor::with(['user:id,first_name,middle_name,last_name,email,phone_number,employee_id,old_employee_id,passport_image'])
+                ->where('loan_id', $loanId)
+                ->get()
+                ->map(function ($guarantor) {
+                    return [
+                        'id' => $guarantor->id,
+                        'guarantor_id' => $guarantor->guarantor_id,
+                        'loan_number' => $guarantor->loan_number,
+                        'guarantor_liability_amount' => number_format($guarantor->guarantor_liability_amount, 2),
+                        'status' => $guarantor->status,
+                        'response_date' => $guarantor->updated_at ? $guarantor->updated_at->format('Y-m-d H:i:s') : null,
+                        'guarantor' => $guarantor->user ? [
+                            'id' => $guarantor->user->id,
+                            'name' => trim($guarantor->user->first_name . ' ' . ($guarantor->user->middle_name ?? '') . ' ' . $guarantor->user->last_name),
+                            'email' => $guarantor->user->email,
+                            'phone_number' => $guarantor->user->phone_number,
+                            'employee_id' => $guarantor->user->employee_id,
+                            'old_employee_id' => $guarantor->user->old_employee_id,
+                            'passport_image' => $guarantor->user->passport_image,
+                        ] : null,
+                    ];
+                });
+
+            // Get all transactions
+            $transactions = Transaction::where('loan_id', $loanId)
+                ->orderBy('transaction_date', 'desc')
+                ->get()
+                ->map(function ($transaction) {
+                    return [
+                        'id' => $transaction->id,
+                        'amount' => number_format($transaction->amount, 2),
+                        'amount_raw' => $transaction->amount,
+                        'payment_type' => $transaction->payment_type,
+                        'transaction_reference' => $transaction->transaction_reference,
+                        'transaction_date' => $transaction->transaction_date ? date('Y-m-d H:i:s', strtotime($transaction->transaction_date)) : null,
+                        'transaction_date_formatted' => $transaction->transaction_date ? date('d M Y, h:i A', strtotime($transaction->transaction_date)) : null,
+                        'created_at' => $transaction->created_at->format('Y-m-d H:i:s'),
+                    ];
+                });
+
+            // Get all deductions
+            $deductions = LoanDeduction::where('loan_id', $loanId)
+                ->orderBy('deducted_at', 'desc')
+                ->get()
+                ->map(function ($deduction) {
+                    return [
+                        'id' => $deduction->id,
+                        'deduction_amount' => number_format($deduction->deduction_amount, 2),
+                        'deduction_amount_raw' => $deduction->deduction_amount,
+                        'deduction_type' => $deduction->deduction_type,
+                        'deducted_at' => $deduction->deducted_at ? date('Y-m-d H:i:s', strtotime($deduction->deducted_at)) : null,
+                        'deducted_at_formatted' => $deduction->deducted_at ? date('d M Y, h:i A', strtotime($deduction->deducted_at)) : null,
+                        'created_at' => $deduction->created_at->format('Y-m-d H:i:s'),
+                    ];
+                });
+
+            // Calculate payment statistics
+            $totalTransactions = $transactions->sum(function ($transaction) {
+                return $transaction['amount_raw'] ?? 0;
+            });
+            $totalDeductions = $deductions->sum(function ($deduction) {
+                return $deduction['deduction_amount_raw'] ?? 0;
+            });
+            $totalPaid = $totalTransactions + $totalDeductions;
+            $outstandingAmount = $loan->loan_balance;
+            $percentagePaid = $loan->loan_amount > 0 ? ($totalPaid / $loan->loan_amount) * 100 : 0;
+            $percentageOutstanding = $loan->loan_amount > 0 ? ($outstandingAmount / $loan->loan_amount) * 100 : 0;
+
+            // Get guarantor statistics
+            $guarantorStats = [
+                'total_guarantors' => $guarantors->count(),
+                'accepted_guarantors' => $guarantors->where('status', 'accepted')->count(),
+                'declined_guarantors' => $guarantors->where('status', 'declined')->count(),
+                'pending_guarantors' => $guarantors->where('status', 'pending')->count(),
+            ];
+
+            // Format loan data
+            $loanData = [
+                'id' => $loan->id,
+                'loan_number' => $loan->loan_number,
+                'loan_amount' => number_format($loan->loan_amount, 2),
+                'loan_amount_raw' => $loan->loan_amount,
+                'approved_amount' => $loan->approved_amount ? number_format($loan->approved_amount, 2) : null,
+                'approved_amount_raw' => $loan->approved_amount,
+                'loan_balance' => number_format($loan->loan_balance, 2),
+                'loan_balance_raw' => $loan->loan_balance,
+                'interest_rate' => $loan->interest_rate,
+                'tenure_months' => $loan->tenure_months,
+                'monthly_installment' => number_format($loan->monthly_installment, 2),
+                'monthly_installment_raw' => $loan->monthly_installment,
+                'loan_status' => $loan->loan_status,
+                'next_due_date' => $loan->next_due_date ? $loan->next_due_date->format('Y-m-d') : null,
+                'applied_at' => $loan->applied_at ? $loan->applied_at->format('Y-m-d H:i:s') : null,
+                'applied_at_formatted' => $loan->applied_at ? $loan->applied_at->format('d M Y, h:i A') : null,
+                'approved_at' => $loan->approved_at ? $loan->approved_at->format('Y-m-d H:i:s') : null,
+                'approved_at_formatted' => $loan->approved_at ? $loan->approved_at->format('d M Y, h:i A') : null,
+                'remarks' => $loan->remarks,
+                'qualifications' => $loan->qualifications,
+                'created_at' => $loan->created_at->format('Y-m-d H:i:s'),
+                'updated_at' => $loan->updated_at->format('Y-m-d H:i:s'),
+            ];
+
+            // Format employee/applicant data
+            $employeeData = $loan->employee ? [
+                'id' => $loan->employee->id,
+                'name' => trim($loan->employee->first_name . ' ' . ($loan->employee->middle_name ?? '') . ' ' . $loan->employee->last_name),
+                'first_name' => $loan->employee->first_name,
+                'middle_name' => $loan->employee->middle_name,
+                'last_name' => $loan->employee->last_name,
+                'email' => $loan->employee->email,
+                'phone_number' => $loan->employee->phone_number,
+                'employee_id' => $loan->employee->employee_id,
+                'old_employee_id' => $loan->employee->old_employee_id,
+                'salary' => $loan->employee->salary ? number_format($loan->employee->salary, 2) : null,
+                'loan_limit' => $loan->employee->loan_limit ? number_format($loan->employee->loan_limit, 2) : null,
+                'passport_image' => $loan->employee->passport_image,
+                'account_created_at' => $loan->employee->created_at->format('Y-m-d H:i:s'),
+            ] : null;
+
+            // Format loan type data
+            $loanTypeData = $loan->loanType ? [
+                'id' => $loan->loanType->id,
+                'name' => $loan->loanType->name,
+                'interest_rate' => $loan->loanType->interest_rate,
+                'approval_type' => $loan->loanType->approval_type,
+                'requires_guarantors' => $loan->loanType->requires_guarantors,
+                'required_guarantors_count' => $loan->loanType->required_guarantors_count,
+                'type' => $loan->loanType->type,
+                'payment_type' => $loan->loanType->payment_type,
+            ] : null;
+
+            // Format approver data
+            $approverData = $loan->approver ? [
+                'id' => $loan->approver->id,
+                'name' => trim($loan->approver->first_name . ' ' . ($loan->approver->middle_name ?? '') . ' ' . $loan->approver->last_name),
+                'email' => $loan->approver->email,
+                'employee_id' => $loan->approver->employee_id,
+            ] : null;
+
+            // Payment statistics
+            $paymentStats = [
+                'total_paid' => number_format($totalPaid, 2),
+                'total_paid_raw' => $totalPaid,
+                'total_transactions' => number_format($totalTransactions, 2),
+                'total_transactions_raw' => $totalTransactions,
+                'total_deductions' => number_format($totalDeductions, 2),
+                'total_deductions_raw' => $totalDeductions,
+                'outstanding_amount' => number_format($outstandingAmount, 2),
+                'outstanding_amount_raw' => $outstandingAmount,
+                'percentage_paid' => round($percentagePaid, 2),
+                'percentage_outstanding' => round($percentageOutstanding, 2),
+                'transaction_count' => $transactions->count(),
+                'deduction_count' => $deductions->count(),
+            ];
+
+            return [
+                'loan' => $loanData,
+                'employee' => $employeeData,
+                'loan_type' => $loanTypeData,
+                'approver' => $approverData,
+                'guarantors' => $guarantors,
+                'guarantor_statistics' => $guarantorStats,
+                'transactions' => $transactions,
+                'deductions' => $deductions,
+                'payment_statistics' => $paymentStats,
+            ];
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            Log::error("Loan not found for admin details: {$e->getMessage()}");
+            throw new \Exception('Loan not found.');
+        } catch (\Exception $e) {
+            Log::error("Error getting admin loan details: {$e->getMessage()}");
+            Log::error($e->getTraceAsString());
             throw $e;
         }
     }

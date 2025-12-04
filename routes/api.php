@@ -52,7 +52,7 @@ Route::prefix('v1')->group(function () {
     Route::post('/register', [AuthController::class, 'externalRegister']);
 
     Route::post('upload-image', [ImageUploadController::class, 'uploadImages']); // ->middleware('can:upload image');
-    Route::get('notifications', [NotificationController::class, 'index']);
+    Route::get('notifications/stream', [NotificationController::class, 'index']); // SSE stream endpoint
     Route::get('admins-get', [AdminController::class, 'getAdmins']);
 
     // Testing SMS Endpoint
@@ -111,6 +111,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/reset-password', [AuthController::class, 'forgotPassword']);
         Route::get('/verify-reset-password', [AuthController::class, 'verifyResetPasswordCode']);
         Route::patch('/change-password-internal', [AuthController::class, 'changePasswordInternal']);
+        Route::patch('/profile', [AuthController::class, 'updateProfile']); // Update authenticated user's profile
 
         Route::post('loan-types', [LoanController::class, 'createLoanType']);
         Route::get('loans/credit-score', [LoanController::class, 'getCreditScores']);
@@ -145,6 +146,7 @@ Route::prefix('v1')->group(function () {
             // B2C Disbursement (initiate disbursement to a user by loan number or user id)
             Route::post('b2c/{identifier}', [MpesaController::class, 'initiateB2CPayment']); // Disburse funds via M-Pesa B2C
         });
+        
         Route::get('loan/user/loan-details', [LoanController::class, 'getUserLoanDetails']); // Get user single loan details
         Route::get('loan/user/payments', [LoanController::class, 'getUserLoanPayments']); // Get user payments
         Route::delete('loan/user/payment', [LoanController::class, 'deleteUserLoanPayment']); // Delete a user single payment
@@ -158,8 +160,14 @@ Route::prefix('v1')->group(function () {
         Route::post('remove-image', [ImageUploadController::class, 'destroy']); // ->middleware('can:delete image');
 
         // Notifications
-        Route::post('notifications/{notificationId}/read', [NotificationController::class, 'markAsRead']);
-        Route::get('mobile-notifications', [NotificationController::class, 'userNotifications']);
+        Route::get('notifications', [NotificationController::class, 'getNotifications']); // Get all notifications (paginated)
+        Route::get('notifications/unread', [NotificationController::class, 'getUnreadNotifications']); // Get unread notifications
+        Route::get('notifications/unread-count', [NotificationController::class, 'getUnreadCount']); // Get unread notification count
+        Route::post('notifications/test', [NotificationController::class, 'testNotification']); // Test notification endpoint
+        Route::post('notifications/mark-all-read', [NotificationController::class, 'markAllAsRead']); // Mark all notifications as read
+        Route::post('notifications/{notificationId}/read', [NotificationController::class, 'markAsRead']); // Mark single notification as read
+        Route::delete('notifications/{notificationId}', [NotificationController::class, 'delete']); // Delete a notification
+        Route::get('mobile-notifications', [NotificationController::class, 'userNotifications']); // Get user notifications (paginated) - legacy endpoint
 
         // Guarantor Responses
         Route::post('guarantor/{guarantorId}/respond', [GuarantorController::class, 'respond']);
@@ -187,7 +195,9 @@ Route::prefix('v1')->group(function () {
             // For Admin
             Route::get('grants', [GrantController::class, 'index']);
             Route::get('grants-get', [GrantController::class, 'getGrantsForTable']);
+            Route::get('grants/statistics', [GrantController::class, 'getGrantStatistics']); // Get grant statistics for dashboard
             Route::get('grants/{grantId}', [GrantController::class, 'show']);
+            Route::get('grants/{grantId}/admin-details', [GrantController::class, 'getAdminGrantDetails']); // Get comprehensive grant details for administrators
             Route::post('grants/{grantId}/approve', [GrantController::class, 'approve']);
             Route::post('grants/{grantId}/reject', [GrantController::class, 'reject']);
             Route::post('grants/{grantId}/paid', [GrantController::class, 'markAsPaid']);
@@ -227,6 +237,7 @@ Route::prefix('v1')->group(function () {
 
             // Loan Endpoints
             Route::get('/loans/{loanId}/details', [LoanController::class, 'getUserLoanDetails']); // Get detailed loan information by loan ID
+            Route::get('/loans/{loanId}/admin-details', [LoanController::class, 'getAdminLoanDetails']); // Get comprehensive loan details for administrators
             Route::get('/employees/{employeeId}/loans', [LoanController::class, 'getEmployeeLoans']); // Get employee loans
             Route::post('/employees/{employeeId}/loans', [LoanController::class, 'applyForLoan']); // ->middleware('can: apply loan');
             Route::post('/employees/{employeeId}/deductions', [LoanController::class, 'processEmployeeDeduction']); // Process employee deduction
@@ -234,12 +245,13 @@ Route::prefix('v1')->group(function () {
             Route::post('/approve-loan/{loan_id}', [LoanController::class, 'approveLoan']); // ->middleware('can: approve loan');
             Route::get('/employees/{employeeId}/loan-limit', [LoanController::class, 'calculateLoanLimit']); // ->middleware('can: calculate loan limit');
             Route::get('/deductions/monthly/datatables', [LoanController::class, 'processDeductions']); // Get monthly deductions for DataTables
-            Route::post('/loans/{loanId}/approve', [LoanController::class, 'approveLoan']); // ->middleware('can: approve loan');
+            Route::put('/loans/{loanId}/approve', [LoanController::class, 'approveLoan']); // ->middleware('can: approve loan');
             Route::patch('/employees/{loanId}/salary', [UserController::class, 'setEmployeeSalary']); // ->middleware('can: set employee salary');
             Route::post('/send-sms', [SMSController::class, 'sendSMS']); // ->middleware('can: send sms');
             Route::get('/sent-sms', [SMSController::class, 'getSentSMS']); // ->middleware('can: get sent sms');
             Route::post('/send-bulk-sms', [SMSController::class, 'sendBulkSMS']); // ->middleware('can: send bulk sms');
             Route::get('/sms/messages/datatables', [SMSController::class, 'getSmsMessagesForDataTables']); // Get SMS messages for DataTables
+            Route::get('/sms/statistics', [SMSController::class, 'getSMSStatistics']); // Get SMS statistics for dashboard
 
             // Roles Endpoints
             Route::get('roles', [RoleController::class, 'index']); // ->middleware('can:view role');
@@ -272,6 +284,7 @@ Route::prefix('v1')->group(function () {
             Route::get('loans/{userId}/personal', [LoanController::class, 'getPersonalLoans']); // ->middleware('can:get personal loans');
             Route::get('loans/{userId}/personal-deduction', [LoanController::class, 'getLoanPersonalDeductions']); // ->middleware('can:get personal deduction')
             Route::get('loans/deductions/datatables', [LoanController::class, 'getLoanDeductionsForDataTables']); // Get loan deductions for DataTables
+            Route::get('transactions/datatables', [LoanController::class, 'getTransactionsForDataTables']); // Get all transactions for DataTables (Admin)
             Route::get('transactions/{employeeId}/datatables', [LoanController::class, 'getUserTransactionsForDataTables']); // Get user transactions for DataTables
 
             // M-Pesa Admin Endpoints
