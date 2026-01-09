@@ -5,6 +5,9 @@ namespace App\Jobs;
 use App\Models\Loan;
 use App\Models\User;
 use App\Models\LoanType;
+use App\Services\NotificationService;
+use App\Jobs\SendSMSJob;
+use App\Services\SMSService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -27,7 +30,7 @@ class NotifyAdminNewLoanApplied implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(): void
+    public function handle(NotificationService $notificationService): void
     {
         try {
             // Get admin email from environment
@@ -42,55 +45,67 @@ class NotifyAdminNewLoanApplied implements ShouldQueue
             $applicantName = $applicant->first_name . ' ' . $applicant->last_name;
 
             // Get Guarantors names
-            $guarantors = User::whereIn('id', $this->loan->guarantors)->get()
+            $guarantors = User::whereIn('id', $this->loan->guarantors ?? [])->get()
                 ->map(function ($guarantor) {
                     return $guarantor->first_name . ' ' . $guarantor->last_name;
                 })->implode(', ');
 
-            // Get Admin Details
-            $administrator = User::where('email', $adminEmail)->first();
+            // Get all admin users
+            $admins = User::query()->whereHas('roles', function($query) {
+                $query->where('name', 'super-admin');
+                $query->orWhere('name', 'admin');
+            })->get();
 
-            if (!$administrator) {
-                Log::error("Admin with email {$adminEmail} not found.");
+            if ($admins->isEmpty()) {
+                Log::error("No admin users found.");
                 return;
             }
-
-            $adminName = $administrator->first_name . ' ' . $administrator->last_name;
 
             // Admin dashboard URL
             $adminDashboardUrl = route('admin.dashboard'); // Update with the correct endpoint
 
-            // Notify admin of new loan application
-            $administrator->notify(new NotifyAdministratorNewLoanApplied(
-                $adminName,
-                $applicantName,
-                $guarantors,
-                $this->loan,
-                $loanType,
-                $adminDashboardUrl
-            ));
+            // Create database notifications for all admins
+            foreach ($admins as $admin) {
+                // Create database notification
+                $notificationService->create($admin, 'new_loan_application', [
+                    'loan_id' => $this->loan->id,
+                    'loan_number' => $this->loan->loan_number,
+                    'amount' => number_format($this->loan->loan_amount, 2),
+                    'applicant_name' => $applicantName,
+                    'loan_type' => $loanType,
+                    'guarantors' => $guarantors,
+                    'action_url' => config('app.url') . '/loans/' . $this->loan->id . '/admin-details'
+                ]);
 
-            // Send SMS to admin as well (queued)
+                // Send email notification
+                $adminName = $admin->first_name . ' ' . $admin->last_name;
+                $admin->notify(new NotifyAdministratorNewLoanApplied(
+                    $adminName,
+                    $applicantName,
+                    $guarantors,
+                    $this->loan,
+                    $loanType,
+                    $adminDashboardUrl
+                ));
+
+                // Send SMS to admin as well (queued)
                 try {
-                    if (!empty($administrator->phone_number)) {
-                        $smsMessage = "New loan application from {$applicantName} for KES " . number_format($this->loan->loan_amount, 2) . ", Loan: {$this->loan->loan_number}. View: {$adminDashboardUrl}";
+                    if (!empty($admin->phone_number)) {
+                        $smsService = app(SMSService::class);
+                        $templateData = [
+                            'applicant_name' => $applicantName,
+                            'loan_number' => $this->loan->loan_number,
+                            'amount' => number_format($this->loan->loan_amount, 2),
+                            'admin_dashboard_url' => $adminDashboardUrl,
+                        ];
 
-                        Log::info('Dispatching SendSMSJob for admin', ['phone' => $administrator->phone_number, 'loan_id' => $this->loan->id]);
-                        SendSMSJob::dispatch($administrator->phone_number, $smsMessage)->onQueue('sms');
-
-                        // Optional synchronous fallback for debugging (set FORCE_SEND_SMS_SYNC=true in .env)
-                        if (env('FORCE_SEND_SMS_SYNC', false)) {
-                            try {
-                                app(SMSService::class)->sendSMS($administrator->phone_number, $smsMessage);
-                                Log::info('Synchronous admin SMS sent (FORCE_SEND_SMS_SYNC enabled)', ['phone' => $administrator->phone_number]);
-                            } catch (\Throwable $ex) {
-                                Log::error('Synchronous admin SMS failed', ['error' => $ex->getMessage()]);
-                            }
-                        }
+                        Log::info('Sending SMS from template for admin', ['phone' => $admin->phone_number, 'loan_id' => $this->loan->id]);
+                        $smsService->sendSMSFromTemplate($admin->phone_number, 'admin_new_loan', $templateData);
                     }
                 } catch (\Exception $e) {
-                    Log::error('Failed to dispatch admin SMS for new loan application: ' . $e->getMessage());
+                    Log::error('Failed to send admin SMS for new loan application: ' . $e->getMessage());
                 }
+            }
         } catch (\Exception $e) {
             Log::error("Error in NotifyAdminNewLoanApplied job: " . $e->getMessage() . " Line: " . $e->getLine());
         }

@@ -90,22 +90,39 @@ class UpdateLoanStatusOnGuarantorResponse implements ShouldQueue
      */
     protected function notifyAdmin(): void
     {
-        $adminEmail = config('app.system_admin'); // Better to use config instead of env()
-        $admin = User::where('email', $adminEmail)->first();
+        // Get all admin users
+        $admins = User::query()->whereHas('roles', function($query) {
+            $query->where('name', 'super-admin');
+            $query->orWhere('name', 'admin');
+        })->get();
 
-        if (!$admin) {
-            Log::error("Admin with email {$adminEmail} not found.");
+        if ($admins->isEmpty()) {
+            Log::error("No admin users found.");
             return;
         }
 
         $applicant = User::findOrFail($this->loan->employee_id);
+        $applicantName = $applicant->first_name . ' ' . $applicant->last_name;
         $loanType = LoanType::findOrFail($this->loan->loan_type_id);
 
-        $admin->notify(new NotifyAdminLoanReadyForApproval(
-            $applicant->full_name, // Assuming you have an accessor for full name
-            $this->loan,
-            $loanType->name
-        ));
+        foreach ($admins as $admin) {
+            // Create database notification
+            $this->notificationService->create($admin, 'loan_ready_for_approval', [
+                'loan_id' => $this->loan->id,
+                'loan_number' => $this->loan->loan_number,
+                'amount' => number_format($this->loan->loan_amount, 2),
+                'applicant_name' => $applicantName,
+                'loan_type' => $loanType->name,
+                'action_url' => config('app.url') . '/loans/' . $this->loan->id . '/admin-details'
+            ]);
+
+            // Send email notification
+            $admin->notify(new NotifyAdminLoanReadyForApproval(
+                $applicantName,
+                $this->loan,
+                $loanType->name
+            ));
+        }
     }
 
     protected function createAcceptanceNotification(Loan $loan): void

@@ -6,6 +6,7 @@ use App\Models\Dependant;
 use App\Models\Grant;
 use App\Models\GrantType;
 use App\Models\User;
+use App\Services\NotificationService;
 use App\Notifications\AdminGrantAppliedNotification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -30,7 +31,7 @@ class NotifyAdminGrantApplication implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(): void
+    public function handle(NotificationService $notificationService): void
     {
         try {
             // Get all admin users
@@ -48,8 +49,21 @@ class NotifyAdminGrantApplication implements ShouldQueue
             $dependant = $this->grant->dependant_id ? Dependant::query()->find($this->grant->dependant_id) : null;
             $grantType = GrantType::query()->find($this->grant->grant_type_id);
             $applicant = User::query()->find($this->grant->user_id);
+            $applicantName = $applicant->first_name . ' ' . $applicant->last_name;
 
             foreach ($admins as $admin) {
+                // Create database notification
+                $notificationService->create($admin, 'new_grant_application', [
+                    'grant_id' => $this->grant->id,
+                    'grant_number' => $this->grant->grant_number,
+                    'amount' => number_format($this->grant->amount, 2),
+                    'applicant_name' => $applicantName,
+                    'grant_type' => $grantType->name,
+                    'dependant_name' => $dependant ? $dependant->first_name . ' ' . $dependant->last_name : null,
+                    'action_url' => config('app.url') . '/grants/' . $this->grant->id . '/admin-details'
+                ]);
+
+                // Send email notification
                 $admin->notify(new AdminGrantAppliedNotification(
                     $this->grant,
                     $dependant,
@@ -61,23 +75,18 @@ class NotifyAdminGrantApplication implements ShouldQueue
                 try {
                     if (!empty($admin->phone_number)) {
                         $applicantName = $applicant->first_name . ' ' . $applicant->last_name;
-                        $smsMessage = "New grant application from {$applicantName} for {$grantType->name} of KES " . number_format($this->grant->amount, 2) . ". Please review.";
+                        $smsService = app(SMSService::class);
+                        $templateData = [
+                            'applicant_name' => $applicantName,
+                            'grant_type' => $grantType->name,
+                            'amount' => number_format($this->grant->amount, 2),
+                        ];
 
-                        Log::info('Dispatching SendSMSJob for admin (grant)', ['phone' => $admin->phone_number, 'grant_id' => $this->grant->id]);
-                        SendSMSJob::dispatch($admin->phone_number, $smsMessage)->onQueue('sms');
-
-                        // Optional synchronous fallback for debugging
-                        if (env('FORCE_SEND_SMS_SYNC', false)) {
-                            try {
-                                app(SMSService::class)->sendSMS($admin->phone_number, $smsMessage);
-                                Log::info('Synchronous grant admin SMS sent (FORCE_SEND_SMS_SYNC enabled)', ['phone' => $admin->phone_number]);
-                            } catch (\Throwable $ex) {
-                                Log::error('Synchronous grant admin SMS failed', ['error' => $ex->getMessage()]);
-                            }
-                        }
+                        Log::info('Sending SMS from template for admin (grant)', ['phone' => $admin->phone_number, 'grant_id' => $this->grant->id]);
+                        $smsService->sendSMSFromTemplate($admin->phone_number, 'admin_new_grant', $templateData);
                     }
                 } catch (\Exception $e) {
-                    Log::error('Failed to dispatch grant admin SMS: ' . $e->getMessage(), ['grant_id' => $this->grant->id]);
+                    Log::error('Failed to send grant admin SMS: ' . $e->getMessage(), ['grant_id' => $this->grant->id]);
                 }
 
                 Log::info('Admin notification sent successfully', [

@@ -13,11 +13,19 @@ use App\Http\Controllers\Api\V1\CsvController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\LoanController;
+use App\Http\Controllers\Api\V1\LoanSettingsController;
+use App\Http\Controllers\Api\V1\NotificationTemplateController;
 use App\Http\Controllers\Api\V1\RoleController;
+use App\Http\Controllers\Api\V1\SmsTemplateController;
+use App\Http\Controllers\Api\V1\SmsSettingsController;
+use App\Http\Controllers\Api\V1\MpesaSettingsController;
+use App\Http\Controllers\Api\V1\UserRoleController;
 use App\Http\Controllers\Api\V1\GuarantorController;
 use App\Http\Controllers\Api\V1\PermissionController;
 use App\Http\Controllers\Api\V1\ImageUploadController;
 use App\Http\Controllers\Api\V1\NotificationController;
+use App\Http\Controllers\Api\V1\NotificationConnectionController;
+use App\Http\Controllers\Api\V1\UserNotificationPreferencesController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\MpesaController;
 use App\Http\Controllers\Api\V1\MpesaCallbackController;
@@ -107,11 +115,12 @@ Route::prefix('v1')->group(function () {
      // Group Authenticated routes
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/profile', [AuthController::class, 'profile']);
+        Route::get('/me/roles-permissions', [AuthController::class, 'getMyRolesAndPermissions']); // Get current user's roles and permissions
         Route::post('/logout', [AuthController::class, 'logout']);
         Route::post('/reset-password', [AuthController::class, 'forgotPassword']);
         Route::get('/verify-reset-password', [AuthController::class, 'verifyResetPasswordCode']);
         Route::patch('/change-password-internal', [AuthController::class, 'changePasswordInternal']);
-        Route::patch('/profile', [AuthController::class, 'updateProfile']); // Update authenticated user's profile
+        Route::put('/profile', [AuthController::class, 'updateProfile']); // Update authenticated user's profile
 
         Route::post('loan-types', [LoanController::class, 'createLoanType']);
         Route::get('loans/credit-score', [LoanController::class, 'getCreditScores']);
@@ -169,6 +178,19 @@ Route::prefix('v1')->group(function () {
         Route::delete('notifications/{notificationId}', [NotificationController::class, 'delete']); // Delete a notification
         Route::get('mobile-notifications', [NotificationController::class, 'userNotifications']); // Get user notifications (paginated) - legacy endpoint
 
+        // User Notification Preferences
+        Route::get('notifications/preferences', [UserNotificationPreferencesController::class, 'getPreferences']); // Get user notification preferences
+        Route::put('notifications/preferences', [UserNotificationPreferencesController::class, 'updatePreferences']); // Update user notification preferences
+        Route::post('notifications/preferences/reset', [UserNotificationPreferencesController::class, 'resetPreferences']); // Reset notification preferences to defaults
+
+        // Notification Connection Management
+        Route::prefix('notifications/connection')->group(function () {
+            Route::get('config', [NotificationConnectionController::class, 'getConfig']); // Get connection configuration
+            Route::get('status', [NotificationConnectionController::class, 'getStatus']); // Get connection status
+            Route::get('health', [NotificationConnectionController::class, 'getHealth']); // Get connection health
+            Route::post('test', [NotificationConnectionController::class, 'testConnection']); // Test connection
+        });
+
         // Guarantor Responses
         Route::post('guarantor/{guarantorId}/respond', [GuarantorController::class, 'respond']);
 
@@ -223,6 +245,7 @@ Route::prefix('v1')->group(function () {
 
             // Users Endpoints
             Route::get('users', [UserController::class, 'getUsers']); // ->middleware('can:view user');
+            Route::get('employees', [UserController::class, 'getSystemEmployees']); // Get employees list
             Route::get('employees/statistics', [UserController::class, 'getEmployeeStatistics']); // Get employee statistics for dashboard
             Route::delete('user/{id}', [UserController::class, 'deleteUser']); // ->middleware('can:delete user');
             Route::post('user/create', [UserController::class, 'createUser']); // ->middleware('can:create user');
@@ -253,27 +276,66 @@ Route::prefix('v1')->group(function () {
             Route::get('/sms/messages/datatables', [SMSController::class, 'getSmsMessagesForDataTables']); // Get SMS messages for DataTables
             Route::get('/sms/statistics', [SMSController::class, 'getSMSStatistics']); // Get SMS statistics for dashboard
 
-            // Roles Endpoints
-            Route::get('roles', [RoleController::class, 'index']); // ->middleware('can:view role');
-            Route::get('roles-get', [RoleController::class, 'getRoles']); // ->middleware('can:view role');
-            Route::post('role', [RoleController::class, 'store']); // ->middleware('can:create role');
-            Route::get('role/{id}', [RoleController::class, 'show']); // ->middleware('can:view role');
-            Route::patch('role/{id}', [RoleController::class, 'update']); // ->middleware('can:update role');
-            Route::delete('role/{id}', [RoleController::class, 'removeRole']); // ->middleware('can:delete role');
-            Route::patch('permissions/sync/{id}', [RoleController::class, 'syncPermissions']); // ->middleware('can:update role');
-            Route::get('role-permissions', [RoleController::class, 'getRolePermissions']); // ->middleware('can:view role');
-            Route::post('remove-permission/{id}', [RoleController::class, 'removePermissionFromRole']); // ->middleware('can:delete role');
-            Route::post('assign-role/{id}', [RoleController::class, 'assignRoleToUser']); // ->middleware('can:update role');
-            Route::post('remove-role/{id}', [RoleController::class, 'removeRoleFromUser']); // ->middleware('can:delete role');
-            Route::delete('role-permissions/{id}', [RoleController::class, 'deleteRoleAndPermission']); // ->middleware('can:delete role');
+            // Legacy Roles Endpoints (for backward compatibility - must come before standardized routes)
+            Route::get('roles', [RoleController::class, 'index']); // DataTables format
+            Route::get('roles-get', [RoleController::class, 'getRoles']); // JSON format
+            Route::post('role', [RoleController::class, 'storeLegacy']); // Create role (legacy)
+            Route::get('role/{id}', [RoleController::class, 'showLegacy']); // Get single role (legacy)
+            Route::patch('role/{id}', [RoleController::class, 'updateLegacy']); // Update role (legacy)
+            Route::delete('role/{id}', [RoleController::class, 'removeRole']); // Delete role (legacy)
+            Route::patch('permissions/sync/{id}', [RoleController::class, 'syncPermissionsLegacy']); // Sync permissions (legacy)
+            Route::get('role-permissions', [RoleController::class, 'getRolePermissions']); // Get role permissions (DataTables)
+            Route::post('remove-permission/{id}', [RoleController::class, 'removePermissionFromRole']); // Remove permission (legacy)
+            Route::post('assign-role/{id}', [RoleController::class, 'assignRoleToUser']); // Assign role to user (legacy)
+            Route::post('remove-role/{id}', [RoleController::class, 'removeRoleFromUser']); // Remove role from user (legacy)
+            Route::delete('role-permissions/{id}', [RoleController::class, 'deleteRoleAndPermission']); // Delete role and permissions (legacy)
 
-            // Permissions Endpoints
-            Route::post('permission', [PermissionController::class, 'storePermission']); // ->middleware('can:create permission');
-            Route::get('permissions', [PermissionController::class, 'getPermissions']); // ->middleware('can:view permission');
-            Route::get('permissions-get', [PermissionController::class, 'index']); // ->middleware('can:view permission');
-            Route::get('permission/{id}', [PermissionController::class, 'getSinglePermission']); // ->middleware('can:view permission');
-            Route::patch('permission/{id}', [PermissionController::class, 'updatePermission']); // ->middleware('can:update permission');
-            Route::delete('permission/{id}', [PermissionController::class, 'deletePermission']); // ->middleware('can:delete permission');
+            // Roles Endpoints (Standardized - more specific routes first)
+            Route::prefix('roles')->group(function () {
+                Route::get('/statistics', [RoleController::class, 'getStatistics']); // Get role statistics
+                Route::post('/bulk-assign', [RoleController::class, 'bulkAssign']); // Bulk assign role to users
+                Route::post('/bulk-remove', [RoleController::class, 'bulkRemove']); // Bulk remove role from users
+                Route::put('/{id}/permissions', [RoleController::class, 'syncPermissions']); // Sync permissions to role
+                Route::post('/{id}/permissions', [RoleController::class, 'addPermission']); // Add permission to role
+                Route::delete('/{id}/permissions/{permissionId}', [RoleController::class, 'removePermission']); // Remove permission from role
+                Route::post('/{id}/permissions/bulk', [RoleController::class, 'bulkAssignPermissions']); // Bulk assign permissions to role
+                Route::get('/{id}/users', [RoleController::class, 'getUsersByRole']); // Get users by role
+                Route::get('/{id}', [RoleController::class, 'show']); // Get single role
+                Route::put('/{id}', [RoleController::class, 'update']); // Update role
+                Route::delete('/{id}', [RoleController::class, 'destroy']); // Delete role
+                Route::post('/', [RoleController::class, 'store']); // Create role (standardized)
+                Route::get('/', [RoleController::class, 'getRolesStandardized']); // Get all roles (standardized) - must be last
+            });
+
+            // Legacy Permissions Endpoints (for backward compatibility - must come before standardized routes)
+            Route::post('permission', [PermissionController::class, 'storePermission']); // Create permission (legacy)
+            Route::get('permissions', [PermissionController::class, 'getPermissions']); // Get permissions (DataTables)
+            Route::get('permissions-get', [PermissionController::class, 'index']); // Get permissions (JSON) - same as new
+            Route::get('permission/{id}', [PermissionController::class, 'getSinglePermission']); // Get single permission (legacy)
+            Route::patch('permission/{id}', [PermissionController::class, 'updatePermission']); // Update permission (legacy)
+            Route::delete('permission/{id}', [PermissionController::class, 'deletePermission']); // Delete permission (legacy)
+
+            // Permissions Endpoints (Standardized - more specific routes first)
+            Route::prefix('permissions')->group(function () {
+                Route::get('/groups', [PermissionController::class, 'getPermissionsByGroup']); // Get permissions by group
+                Route::get('/groups/list', [PermissionController::class, 'getGroups']); // Get permission groups list
+                Route::get('/statistics', [PermissionController::class, 'getStatistics']); // Get permission statistics
+                Route::get('/{id}', [PermissionController::class, 'show']); // Get single permission
+                Route::put('/{id}', [PermissionController::class, 'update']); // Update permission
+                Route::delete('/{id}', [PermissionController::class, 'destroy']); // Delete permission
+                Route::post('/', [PermissionController::class, 'store']); // Create permission
+                Route::get('/', [PermissionController::class, 'index']); // Get all permissions (standardized) - must be last
+            });
+
+            // User Role and Permission Management
+            Route::prefix('users/{userId}')->group(function () {
+                Route::get('/roles-permissions', [UserRoleController::class, 'getUserRolesAndPermissions']); // Get user's roles and permissions
+                Route::post('/roles', [UserRoleController::class, 'assignRoles']); // Assign roles to user
+                Route::put('/roles', [UserRoleController::class, 'syncRoles']); // Sync roles to user
+                Route::delete('/roles/{roleId}', [UserRoleController::class, 'removeRole']); // Remove role from user
+                Route::post('/permissions', [UserRoleController::class, 'assignPermission']); // Assign direct permission to user
+                Route::delete('/permissions/{permissionId}', [UserRoleController::class, 'removePermission']); // Remove direct permission from user
+            });
 
             // Loan Endpoints
             Route::post('loans/accept-payment', [LoanController::class, 'acceptPayment']); // ->middleware('can:accept payment');
@@ -289,6 +351,70 @@ Route::prefix('v1')->group(function () {
 
             // M-Pesa Admin Endpoints
             Route::get('mpesa/transactions/datatables', [MpesaController::class, 'getMpesaTransactionsForDataTables']); // Get M-Pesa transactions for DataTables
+
+            // Loan Settings Endpoints
+            Route::prefix('loan-settings')->group(function () {
+                // Global Settings
+                Route::get('global', [LoanSettingsController::class, 'getGlobalSettings']);
+                Route::put('global', [LoanSettingsController::class, 'updateGlobalSettings']);
+                
+                // Limit Calculation Settings
+                Route::get('limit-calculation', [LoanSettingsController::class, 'getLimitCalculationSettings']);
+                Route::put('limit-calculation', [LoanSettingsController::class, 'updateLimitCalculationSettings']);
+                
+                // Payment Settings
+                Route::get('payments', [LoanSettingsController::class, 'getPaymentSettings']);
+                Route::put('payments', [LoanSettingsController::class, 'updatePaymentSettings']);
+                
+                // Approval Workflow Settings
+                Route::get('approval-workflow', [LoanSettingsController::class, 'getApprovalWorkflowSettings']);
+                Route::put('approval-workflow', [LoanSettingsController::class, 'updateApprovalWorkflowSettings']);
+                
+                // Notification Settings
+                Route::get('notifications', [LoanSettingsController::class, 'getNotificationSettings']);
+                Route::put('notifications', [LoanSettingsController::class, 'updateNotificationSettings']);
+            });
+
+            // Loan Type Management (Enhanced CRUD)
+            Route::get('loan-types', [LoanSettingsController::class, 'getLoanTypes']); // Get all loan types with filters
+            Route::get('loan-types/{id}', [LoanSettingsController::class, 'getLoanType']); // Get single loan type
+            Route::put('loan-types/{id}', [LoanSettingsController::class, 'updateLoanType']); // Update loan type
+            Route::delete('loan-types/{id}', [LoanSettingsController::class, 'deleteLoanType']); // Delete loan type
+
+            // Notification Template Management
+            Route::get('notification-templates', [NotificationTemplateController::class, 'index']); // Get all notification templates
+            Route::get('notification-templates/types', [NotificationTemplateController::class, 'getTypes']); // Get available notification types
+            Route::get('notification-templates/type/{type}', [NotificationTemplateController::class, 'getByType']); // Get template by type
+            Route::get('notification-templates/{id}', [NotificationTemplateController::class, 'show']); // Get single notification template
+            Route::post('notification-templates', [NotificationTemplateController::class, 'store']); // Create notification template
+            Route::put('notification-templates/{id}', [NotificationTemplateController::class, 'update']); // Update notification template
+            Route::delete('notification-templates/{id}', [NotificationTemplateController::class, 'destroy']); // Delete notification template
+            Route::post('notification-templates/{id}/preview', [NotificationTemplateController::class, 'preview']); // Preview template with sample data
+
+            // SMS Settings Management
+            Route::prefix('sms')->group(function () {
+                Route::get('settings', [SmsSettingsController::class, 'getSettings']); // Get SMS settings
+                Route::put('settings', [SmsSettingsController::class, 'updateSettings']); // Update SMS settings
+                
+                // SMS Template Management
+                Route::get('templates', [SmsTemplateController::class, 'index']); // Get all SMS templates
+                Route::get('templates/types', [SmsTemplateController::class, 'getTypes']); // Get available template types
+                Route::get('templates/type/{type}', [SmsTemplateController::class, 'getByType']); // Get template by type
+                Route::get('templates/{id}', [SmsTemplateController::class, 'show']); // Get single SMS template
+                Route::post('templates', [SmsTemplateController::class, 'store']); // Create SMS template
+                Route::put('templates/{id}', [SmsTemplateController::class, 'update']); // Update SMS template
+                Route::delete('templates/{id}', [SmsTemplateController::class, 'destroy']); // Delete SMS template
+                Route::post('templates/{id}/preview', [SmsTemplateController::class, 'preview']); // Preview template with sample data
+            });
+
+            // M-Pesa Settings Management
+            Route::prefix('mpesa')->group(function () {
+                Route::get('settings', [MpesaSettingsController::class, 'getSettings']); // Get M-Pesa settings
+                Route::put('settings', [MpesaSettingsController::class, 'updateSettings']); // Update M-Pesa settings
+                Route::post('settings/test-connection', [MpesaSettingsController::class, 'testConnection']); // Test M-Pesa connection
+                Route::get('settings/validate', [MpesaSettingsController::class, 'validateConfiguration']); // Validate M-Pesa configuration
+                Route::get('settings/statistics', [MpesaSettingsController::class, 'getStatistics']); // Get M-Pesa transaction statistics
+            });
         });
     });
 });

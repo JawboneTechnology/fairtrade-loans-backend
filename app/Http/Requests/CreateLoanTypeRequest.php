@@ -30,6 +30,7 @@ class CreateLoanTypeRequest extends FormRequest
             'interest_rate' => 'required|integer',
             'approval_type' => 'required|string',
             'type' => 'nullable|string',
+            'is_active' => 'sometimes|boolean',
         ];
     }
 }

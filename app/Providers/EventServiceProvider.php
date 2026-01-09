@@ -10,6 +10,7 @@ use App\Events\LoanApproved;
 use App\Events\LoanRejected;
 use App\Events\GrantApproved;
 use App\Events\GrantRejected;
+use App\Events\LoanApplicantNotified;
 use App\Listeners\SendPaymentSuccessNotification;
 use App\Listeners\SendDeductionNotification;
 use App\Listeners\SendPasswordChangedNotification;
@@ -18,6 +19,8 @@ use App\Listeners\NotifyApplicantLoanApproved;
 use App\Listeners\NotifyApplicantLoanRejected;
 use App\Listeners\NotifyApplicantGrantApproved;
 use App\Listeners\NotifyApplicantGrantRejected;
+use App\Listeners\NotifyApplicantGuarantorResponse;
+use App\Listeners\UpdateApplicantLoanStatus;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
 
 class EventServiceProvider extends ServiceProvider
@@ -51,6 +54,10 @@ class EventServiceProvider extends ServiceProvider
         ],
         GrantRejected::class => [
             NotifyApplicantGrantRejected::class,
+        ],
+        LoanApplicantNotified::class => [
+            NotifyApplicantGuarantorResponse::class,
+            UpdateApplicantLoanStatus::class,
         ],
         // You can add other existing events here
         \App\Events\StkPushRequested::class => [

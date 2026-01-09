@@ -5,6 +5,9 @@ namespace App\Services;
 use DataTables;
 use App\Jobs\SendSMSJob;
 use App\Models\SmsMessage;
+use App\Models\SmsTemplate;
+use App\Services\SmsTemplateService;
+use App\Services\SmsSettingsService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
@@ -14,19 +17,28 @@ use Illuminate\Database\Eloquent\Collection;
 class SMSService
 {
     protected $sms;
+    protected SmsSettingsService $settingsService;
+    protected SmsTemplateService $templateService;
 
-    public function __construct()
+    public function __construct(SmsSettingsService $settingsService = null, SmsTemplateService $templateService = null)
     {
+        $this->settingsService = $settingsService ?? app(SmsSettingsService::class);
+        $this->templateService = $templateService ?? app(SmsTemplateService::class);
+        
         try {
-            $username = config('services.africastalking.username');
-            $apiKey = config('services.africastalking.api_key');
+            // Get settings from service
+            $settings = $this->settingsService->getSettings();
+            $provider = $settings['provider'] ?? [];
+            
+            $username = $provider['username'] ?? config('services.africastalking.username');
+            $apiKey = $provider['api_key'] ?? config('services.africastalking.api_key');
             
             // Trim whitespace and stray quotes
             $username = $username ? trim($username, " \t\n\r\0\x0B\"'") : null;
             $apiKey = $apiKey ? trim($apiKey, " \t\n\r\0\x0B\"'") : null;
             
             if (empty($username) || empty($apiKey)) {
-                throw new \Exception('Africa\'s Talking credentials not configured. Please check your .env file.');
+                throw new \Exception('Africa\'s Talking credentials not configured. Please check your .env file or SMS settings.');
             }
             
             $africasTalking = new AfricasTalking($username, $apiKey);
@@ -35,6 +47,48 @@ class SMSService
         } catch (\Exception $e) {
             Log::error('Failed to initialize Africa\'s Talking SDK: ' . $e->getMessage());
             throw $e;
+        }
+    }
+
+    /**
+     * Send SMS from template
+     *
+     * @param string $recipient
+     * @param string $templateType
+     * @param array $data
+     * @param string|null $sentBy
+     * @return SmsMessage|null
+     */
+    public function sendSMSFromTemplate(string $recipient, string $templateType, array $data, ?string $sentBy = null): ?SmsMessage
+    {
+        // Check if SMS notifications are enabled
+        if (!$this->settingsService->isSmsNotificationsEnabled()) {
+            Log::info('SMS notifications are disabled, skipping SMS send', [
+                'recipient' => $recipient,
+                'template_type' => $templateType
+            ]);
+            return null;
+        }
+
+        try {
+            $template = $this->templateService->getTemplateByType($templateType);
+            
+            if (!$template) {
+                Log::warning('SMS template not found, falling back to direct message', [
+                    'template_type' => $templateType,
+                    'recipient' => $recipient
+                ]);
+                return null;
+            }
+
+            $message = $template->parseMessage($data);
+            return $this->sendSMS($recipient, $message, $sentBy);
+        } catch (\Exception $e) {
+            Log::error('Error sending SMS from template: ' . $e->getMessage(), [
+                'template_type' => $templateType,
+                'recipient' => $recipient
+            ]);
+            return null;
         }
     }
 
@@ -49,7 +103,10 @@ class SMSService
     public function sendSMS(string $recipient, string $message, ?string $sentBy = null): SmsMessage
     {
         $userId = $sentBy ?? Auth::id() ?? 0;
-        $senderId = config('services.africastalking.sender_id', 'JAWBONETECH');
+        
+        // Get sender ID from settings
+        $settings = $this->settingsService->getSettings();
+        $senderId = $settings['provider']['sender_id'] ?? config('services.africastalking.sender_id', 'JAWBONETECH');
 
         try {
             // Validate recipient format

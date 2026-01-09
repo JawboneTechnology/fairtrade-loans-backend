@@ -10,8 +10,24 @@ class Role extends SpatieRole
 {
     use HasUuids;
 
-     public $incrementing = false;
-     protected $keyType = 'string';
+    public $incrementing = false;
+    protected $keyType = 'string';
+
+    protected $fillable = [
+        'name',
+        'display_name',
+        'description',
+        'guard_name',
+        'priority',
+        'is_system_role',
+        'metadata',
+    ];
+
+    protected $casts = [
+        'is_system_role' => 'boolean',
+        'priority' => 'integer',
+        'metadata' => 'array',
+    ];
 
     protected static function boot()
     {

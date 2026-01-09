@@ -57,16 +57,19 @@ class NotifyApplicantGrantStatusSMS implements ShouldQueue
                 return;
             }
 
-            $message = $this->buildMessage($user);
+            // Use template-based SMS
+            $templateType = $this->status === 'approved' ? 'grant_approved' : 'grant_rejected';
+            $templateData = $this->buildTemplateData($user);
 
-            Log::info('Sending grant status SMS notification', [
+            Log::info('Sending grant status SMS notification from template', [
                 'phone' => $recipientPhone,
                 'grant_id' => $this->grant->id,
-                'status' => $this->status
+                'status' => $this->status,
+                'template_type' => $templateType
             ]);
 
-            // Send SMS via SMS service
-            $smsService->sendSMS($recipientPhone, $message, $user->id);
+            // Send SMS via SMS service using template
+            $smsService->sendSMSFromTemplate($recipientPhone, $templateType, $templateData, $user->id);
 
             Log::info('Grant status SMS notification sent successfully', [
                 'phone' => $recipientPhone,
@@ -84,34 +87,21 @@ class NotifyApplicantGrantStatusSMS implements ShouldQueue
     }
 
     /**
-     * Build the SMS message based on grant status
+     * Build template data for grant status SMS
      */
-    private function buildMessage(User $user): string
+    private function buildTemplateData(User $user): array
     {
         $grantType = GrantType::find($this->grant->grant_type_id);
         $grantTypeName = $grantType ? $grantType->name : 'grant';
         $userName = $user->first_name;
         $amount = number_format($this->grant->amount, 2);
 
-        if ($this->status === 'approved') {
-            $message = "Dear {$userName}, your grant application for {$grantTypeName} of KES {$amount} has been approved.";
-            
-            if ($this->adminNotes) {
-                $message .= " Remarks: {$this->adminNotes}";
-            }
-            
-            $message .= " You will receive disbursement details soon.";
-        } else {
-            $message = "Dear {$userName}, your grant application for {$grantTypeName} of KES {$amount} has been rejected.";
-            
-            if ($this->adminNotes) {
-                $message .= " Remarks: {$this->adminNotes}";
-            } else {
-                $message .= " Please contact support for more information.";
-            }
-        }
-
-        return $message;
+        return [
+            'user_name' => $userName,
+            'grant_type' => $grantTypeName,
+            'amount' => $amount,
+            'remarks' => $this->adminNotes ?? '',
+        ];
     }
 
     /**

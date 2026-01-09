@@ -19,10 +19,11 @@ class NotificationService
         $notificationData = $data;
         
         // Add template data if template exists
+        // But respect custom title/message if provided in data
         if ($template) {
             $notificationData = array_merge($data, [
-                'title'     => $template->title,
-                'message'   => $this->parseTemplate($template->message, $data)
+                'title'     => $data['title'] ?? $template->title,
+                'message'   => $data['message'] ?? $this->parseTemplate($template->message, $data)
             ]);
         } else {
             // Fallback if no template found
@@ -36,7 +37,9 @@ class NotificationService
             'id'            => Str::uuid(),
             'user_id'       => $user->id,
             'type'          => $type,
-            'data'          => $notificationData
+            'data'          => $notificationData,
+            'is_read'       => false, // Explicitly set as unread
+            'read_at'        => null  // Explicitly set as null
         ]);
 
         // Broadcast new notification

@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Events\GrantRejected;
 use App\Jobs\NotifyApplicantGrantStatusSMS;
+use App\Services\NotificationService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Support\Facades\Log;
@@ -12,12 +13,14 @@ class NotifyApplicantGrantRejected implements ShouldQueue
 {
     use InteractsWithQueue;
 
+    protected NotificationService $notificationService;
+
     /**
      * Create the event listener.
      */
-    public function __construct()
+    public function __construct(NotificationService $notificationService)
     {
-        //
+        $this->notificationService = $notificationService;
     }
 
     /**
@@ -36,6 +39,23 @@ class NotifyApplicantGrantRejected implements ShouldQueue
                 'rejected',
                 $event->adminNotes
             )->onQueue('sms');
+
+            // Create database notification for the employee
+            $user = $event->grant->user;
+            if ($user) {
+                $this->notificationService->create($user, 'grant_rejected', [
+                    'grant_id' => $event->grant->id,
+                    'grant_number' => $event->grant->grant_number ?? $event->grant->id,
+                    'amount' => number_format($event->grant->amount, 2),
+                    'remarks' => $event->adminNotes ?? 'Please contact support for more information.',
+                    'action_url' => config('app.url') . '/grants/' . $event->grant->id,
+                ]);
+
+                Log::info('Grant rejection notification created for employee', [
+                    'user_id' => $user->id,
+                    'grant_id' => $event->grant->id
+                ]);
+            }
 
         } catch (\Exception $e) {
             Log::error('Error in NotifyApplicantGrantRejected listener', [

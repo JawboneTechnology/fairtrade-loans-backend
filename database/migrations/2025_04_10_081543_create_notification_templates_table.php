@@ -18,7 +18,7 @@ return new class extends Migration
             $table->string('type')->unique();
             $table->string('title');
             $table->text('message');
-            $table->json('channels')->default(json_encode(['database', 'email']));
+            $table->json('channels');
             $table->timestamps();
         });
     }

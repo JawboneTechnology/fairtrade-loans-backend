@@ -48,10 +48,16 @@ class NotifyUserGrantApplication implements ShouldQueue
             try {
                 if (!empty($applicant->phone_number)) {
                     $applicantName = $applicant->first_name . ' ' . $applicant->last_name;
-                    $smsMessage = "Dear {$applicantName}, your grant application for {$grantType->name} of KES " . number_format($this->grant->amount, 2) . " has been received and is under review.";
+                    $smsService = app(\App\Services\SMSService::class);
+                    
+                    $templateData = [
+                        'user_name' => $applicantName,
+                        'grant_type' => $grantType->name,
+                        'amount' => number_format($this->grant->amount, 2),
+                    ];
 
-                    Log::info('Dispatching SendSMSJob for grant applicant', ['phone' => $applicant->phone_number, 'grant_id' => $this->grant->id]);
-                    SendSMSJob::dispatch($applicant->phone_number, $smsMessage, $applicant->id)->onQueue('sms');
+                    Log::info('Sending SMS from template for grant applicant', ['phone' => $applicant->phone_number, 'grant_id' => $this->grant->id]);
+                    $smsService->sendSMSFromTemplate($applicant->phone_number, 'grant_application_submitted', $templateData, $applicant->id);
 
                     // Optional synchronous fallback for debugging
                     if (env('FORCE_SEND_SMS_SYNC', false)) {

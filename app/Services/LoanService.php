@@ -28,22 +28,54 @@ use App\Jobs\NotifyAdminNewLoanApplied;
 use App\Jobs\NotifyApplicantLoanPlaced;
 use App\Jobs\NotifyApplicantLoanCanceled;
 use Illuminate\Database\Eloquent\Collection;
+use App\Services\LoanSettingsService;
 
 class LoanService
 {
+    protected LoanSettingsService $loanSettingsService;
+
+    public function __construct(LoanSettingsService $loanSettingsService)
+    {
+        $this->loanSettingsService = $loanSettingsService;
+    }
     public function calculateLoanLimit(User $employee)
     {
         DB::beginTransaction();
 
         try {
+            $limitSettings = $this->loanSettingsService->getLimitCalculationSettings();
+            $globalSettings = $this->loanSettingsService->getGlobalSettings();
+            
             $salary = $employee->salary;
-            $existingLoans = Loan::where('employee_id', $employee->id)
-                ->where('loan_status', '!=', 'completed')
-                ->sum('loan_balance');
+            
+            // Get existing loans based on settings
+            $query = Loan::where('employee_id', $employee->id);
+            
+            if ($limitSettings['consider_existing_loans']) {
+                if ($limitSettings['include_pending_loans']) {
+                    $query->whereNotIn('loan_status', ['completed', 'rejected', 'canceled']);
+                } else {
+                    $query->where('loan_status', '!=', 'completed');
+                }
+            } else {
+                $query->whereRaw('1 = 0'); // No existing loans considered
+            }
+            
+            $existingLoans = $query->sum('loan_balance');
 
-            $allowedInstallment = $salary * 0.3; // Allow 30% of salary for loan installments.
-            $maxLoanAmount = $allowedInstallment * 12; // Assuming 12 months tenure.
-            $finalLimit = max(0, $maxLoanAmount - $existingLoans);
+            // Calculate based on settings
+            $maxInstallmentPercentage = $limitSettings['max_installment_percentage'] ?? $globalSettings['max_installment_percentage'] ?? 30;
+            $defaultTenureMonths = $limitSettings['default_tenure_months'] ?? $globalSettings['default_tenure_months'] ?? 12;
+            $salaryMultiplier = $limitSettings['salary_multiplier'] ?? $defaultTenureMonths;
+            
+            $allowedInstallment = $salary * ($maxInstallmentPercentage / 100);
+            $maxLoanAmount = $allowedInstallment * $salaryMultiplier;
+            
+            // Apply min/max limits
+            $minLoanLimit = $limitSettings['min_loan_limit'] ?? 0;
+            $maxLoanLimit = $limitSettings['max_loan_limit'] ?? PHP_INT_MAX;
+            
+            $finalLimit = max($minLoanLimit, min($maxLoanLimit, max(0, $maxLoanAmount - $existingLoans)));
 
             $employee->loan_limit = $finalLimit;
             $employee->save();
@@ -101,15 +133,25 @@ class LoanService
 
     protected function validateDailyApplicationLimit(User $employee): void
     {
+        $globalSettings = $this->loanSettingsService->getGlobalSettings();
+        $dailyLimit = $globalSettings['daily_application_limit'] ?? 1;
+
+        if ($dailyLimit <= 0) {
+            return; // No limit if set to 0 or negative
+        }
+
         $today = now()->startOfDay();
         $tomorrow = now()->addDay()->startOfDay();
 
-        $hasAppliedToday = Loan::where('employee_id', $employee->id)
+        $applicationsToday = Loan::where('employee_id', $employee->id)
             ->whereBetween('created_at', [$today, $tomorrow])
-            ->exists();
+            ->count();
 
-        if ($hasAppliedToday) {
-            throw new \Exception('You can only submit one loan application per day.');
+        if ($applicationsToday >= $dailyLimit) {
+            $message = $dailyLimit === 1 
+                ? 'You can only submit one loan application per day.'
+                : "You have reached the daily application limit of {$dailyLimit} application(s).";
+            throw new \Exception($message);
         }
     }
 
@@ -374,12 +416,12 @@ class LoanService
         }
 
         // Ensure loan is still pending
-        if ($loan->loan_status !== 'pending') {
+        if ($loan->loan_status !== 'pending' && $loan->loan_status !== 'processing') {
             throw new \Exception('Loan already processed.');
         }
 
         // Update loan based on status
-        if ($data['loan_status'] === 'approved') {
+        if ($data['status'] === 'approved') {
             $this->approve($loan, $data);
         } else {
             $this->reject($loan, $data);
@@ -1532,18 +1574,19 @@ class LoanService
         $daysUntilDue = now()->diffInDays($loan->next_due_date, false);
         $employeeName = $employee->first_name;
 
-        if ($reminderType === 'early') {
-            $message = "Dear {$employeeName}, your loan installment of KES " . number_format($loan->monthly_installment, 2) . 
-                      " for loan {$loan->loan_number} is due in {$daysUntilDue} days on " . 
-                      $loan->next_due_date->format('M j, Y') . ". Please prepare for payment.";
-        } else {
-            $message = "Dear {$employeeName}, REMINDER: Your loan installment of KES " . number_format($loan->monthly_installment, 2) . 
-                      " for loan {$loan->loan_number} is due tomorrow (" . 
-                      $loan->next_due_date->format('M j, Y') . "). Please ensure timely payment.";
-        }
+        // Use template-based SMS
+        $templateType = $reminderType === 'early' ? 'installment_reminder_early' : 'installment_reminder_late';
+        $smsService = app(\App\Services\SMSService::class);
+        
+        $templateData = [
+            'user_name' => $employeeName,
+            'loan_number' => $loan->loan_number,
+            'monthly_installment' => number_format($loan->monthly_installment, 2),
+            'due_date' => $loan->next_due_date->format('M j, Y'),
+            'days_until_due' => $daysUntilDue,
+        ];
 
-        // Dispatch SMS job
-        SendSMSJob::dispatch($employee->phone_number, $message, $employee->id)->onQueue('sms');
+        $smsService->sendSMSFromTemplate($employee->phone_number, $templateType, $templateData, $employee->id);
 
         // Optional synchronous fallback for debugging
         if (env('FORCE_SEND_SMS_SYNC', false)) {
@@ -1589,13 +1632,18 @@ class LoanService
         $daysOverdue = now()->diffInDays($loan->next_due_date, false);
         $employeeName = $employee->first_name;
 
-        $message = "Dear {$employeeName}, your loan installment of KES " . number_format($loan->monthly_installment, 2) . 
-                  " for loan {$loan->loan_number} is now {$daysOverdue} days OVERDUE. " . 
-                  "Outstanding balance: KES " . number_format($loan->loan_balance, 2) . 
-                  ". Please pay immediately to avoid penalties.";
+        // Use template-based SMS
+        $smsService = app(\App\Services\SMSService::class);
+        
+        $templateData = [
+            'user_name' => $employeeName,
+            'loan_number' => $loan->loan_number,
+            'monthly_installment' => number_format($loan->monthly_installment, 2),
+            'days_overdue' => abs($daysOverdue),
+            'loan_balance' => number_format($loan->loan_balance, 2),
+        ];
 
-        // Dispatch SMS job
-        SendSMSJob::dispatch($employee->phone_number, $message, $employee->id)->onQueue('sms');
+        $smsService->sendSMSFromTemplate($employee->phone_number, 'loan_overdue', $templateData, $employee->id);
 
         // Optional synchronous fallback for debugging
         if (env('FORCE_SEND_SMS_SYNC', false)) {

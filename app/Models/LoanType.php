@@ -15,11 +15,13 @@ class LoanType extends Model
         'guarantor_qualifications',
         'type',
         'payment_type',
+        'is_active',
     ];
 
     protected $casts = [
         'requires_guarantors'       => 'boolean',
         'guarantor_qualifications'  => 'array', // This will auto-convert JSON to an array.
+        'is_active'                 => 'boolean',
     ];
 
     public function loans() {

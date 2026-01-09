@@ -149,6 +149,30 @@ class AuthController extends Controller
     }
 
     /**
+     * Get current user's roles and permissions
+     */
+    public function getMyRolesAndPermissions(): JsonResponse
+    {
+        try {
+            $userRoleService = app(\App\Services\UserRoleService::class);
+            $data = $userRoleService->getCurrentUserPermissions();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Your roles and permissions retrieved successfully',
+                'data' => $data,
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to retrieve roles and permissions',
+                'error' => $e->getMessage(),
+                'data' => null,
+            ], 500);
+        }
+    }
+
+    /**
      * Update authenticated user's profile
      *
      * @param UpdateProfileRequest $request

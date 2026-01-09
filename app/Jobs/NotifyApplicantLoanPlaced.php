@@ -6,6 +6,7 @@ use Carbon\Carbon;
 use App\Models\Loan;
 use App\Models\User;
 use App\Models\LoanType;
+use App\Services\NotificationService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -30,18 +31,17 @@ class NotifyApplicantLoanPlaced implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(): void
+    public function handle(NotificationService $notificationService): void
     {
         try {
             $applicant = User::findOrFail($this->loan->employee_id);
 
             // Fetch applicant and loan details
-            $applicant = User::findOrFail($this->loan->employee_id);
             $applicantName = $applicant->first_name . ' ' . $applicant->last_name;
             $loanType = LoanType::findOrFail($this->loan->loan_type_id)->name;
 
             // Get guarantors' names as a comma-separated string
-            $guarantors = User::whereIn('id', $this->loan->guarantors)->get()
+            $guarantors = User::whereIn('id', $this->loan->guarantors ?? [])->get()
                 ->map(function ($guarantor) {
                     return $guarantor->first_name . ' ' . $guarantor->last_name;
                 })
@@ -50,7 +50,7 @@ class NotifyApplicantLoanPlaced implements ShouldQueue
             // Applicant dashboard URL
             $applicantDashboardUrl = ""; // Update this route as needed
 
-            // Notify the applicant
+            // Notify the applicant via email
             $applicant->notify(new NotifyApplicantLoanPlacedNotification(
                 $applicantName,
                 $this->loan,
@@ -59,13 +59,35 @@ class NotifyApplicantLoanPlaced implements ShouldQueue
                 $applicantDashboardUrl
             ));
 
+            // Create database notification for the employee
+            $notificationService->create($applicant, 'loan_application_submitted', [
+                'loan_id' => $this->loan->id,
+                'loan_number' => $this->loan->loan_number,
+                'amount' => number_format($this->loan->loan_amount, 2),
+                'loan_type' => $loanType,
+                'guarantors' => $guarantors,
+                'action_url' => config('app.url') . '/loans/' . $this->loan->id,
+            ]);
+
+            Log::info('Loan application submitted notification created for employee', [
+                'employee_id' => $applicant->id,
+                'loan_id' => $this->loan->id
+            ]);
+
             // Send SMS to applicant as well (queued)
             try {
                 if (!empty($applicant->phone_number)) {
-                    $smsMessage = "Dear {$applicantName}, your loan application for KES " . number_format($this->loan->loan_amount, 2) . " has been received. Loan number: {$this->loan->loan_number}.";
+                    $smsService = app(\App\Services\SMSService::class);
+                    
+                    $templateData = [
+                        'user_name' => $applicantName,
+                        'loan_number' => $this->loan->loan_number,
+                        'amount' => number_format($this->loan->loan_amount, 2),
+                        'loan_type' => $loanType,
+                    ];
 
-                    Log::info('Dispatching SendSMSJob for applicant', ['phone' => $applicant->phone_number, 'loan_id' => $this->loan->id]);
-                    SendSMSJob::dispatch($applicant->phone_number, $smsMessage, $this->loan->employee_id)->onQueue('sms');
+                    Log::info('Sending SMS from template for applicant', ['phone' => $applicant->phone_number, 'loan_id' => $this->loan->id]);
+                    $smsService->sendSMSFromTemplate($applicant->phone_number, 'loan_application_submitted', $templateData, $this->loan->employee_id);
 
                     // Optional synchronous fallback for debugging (set FORCE_SEND_SMS_SYNC=true in .env)
                     if (env('FORCE_SEND_SMS_SYNC', false)) {

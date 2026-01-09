@@ -83,12 +83,21 @@ class SendOtpCode implements ShouldQueue
     private function sendOtpViaSms(string $userName, SMSService $smsService): void
     {
         try {
-            // Construct the SMS message
+            // Use template-based SMS
             $appName = config('app.name', 'LoanApp');
-            $message = "Hello {$userName}, your {$appName} OTP code is: {$this->resetCode}. This code expires in 30 minutes. Do not share this code.";
+            $templateData = [
+                'user_name' => $userName,
+                'otp_code' => $this->resetCode,
+                'app_name' => $appName,
+            ];
 
-            // Send SMS
-            $smsService->sendSms($this->formatPhoneNumber($this->user->phone_number), $message, $this->user->id);
+            // Send SMS using template
+            $smsService->sendSMSFromTemplate(
+                $this->formatPhoneNumber($this->user->phone_number),
+                'otp_code',
+                $templateData,
+                $this->user->id
+            );
 
             // Log success
             Log::info("=== OTP SENT VIA SMS ===");

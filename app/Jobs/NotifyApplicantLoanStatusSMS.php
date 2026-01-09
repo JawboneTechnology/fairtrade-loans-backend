@@ -58,16 +58,27 @@ class NotifyApplicantLoanStatusSMS implements ShouldQueue
                 return;
             }
 
-            $message = $this->buildMessage($employee);
+            // Use template-based SMS
+            $templateType = $this->status === 'approved' ? 'loan_approved' : 'loan_rejected';
+            $amount = $this->approvedAmount ? number_format($this->approvedAmount, 2) : number_format($this->loan->loan_amount, 2);
+            
+            $templateData = [
+                'user_name' => $employee->first_name,
+                'loan_number' => $this->loan->loan_number,
+                'amount' => number_format($this->loan->loan_amount, 2),
+                'approved_amount' => $amount,
+                'remarks' => $this->remarks ?? '',
+            ];
 
-            Log::info('Sending loan status SMS notification', [
+            Log::info('Sending loan status SMS notification from template', [
                 'phone' => $recipientPhone,
                 'loan_id' => $this->loan->id,
-                'status' => $this->status
+                'status' => $this->status,
+                'template_type' => $templateType
             ]);
 
-            // Send SMS via SMS service
-            $smsService->sendSMS($recipientPhone, $message, $employee->id);
+            // Send SMS via SMS service using template
+            $smsService->sendSMSFromTemplate($recipientPhone, $templateType, $templateData, $employee->id);
 
             Log::info('Loan status SMS notification sent successfully', [
                 'phone' => $recipientPhone,
@@ -89,6 +100,8 @@ class NotifyApplicantLoanStatusSMS implements ShouldQueue
      */
     private function buildMessage(User $employee): string
     {
+        // This method is kept for backward compatibility but is no longer used
+        // Template-based messaging is now used in handle()
         $loanNumber = $this->loan->loan_number;
         $employeeName = $employee->first_name;
 

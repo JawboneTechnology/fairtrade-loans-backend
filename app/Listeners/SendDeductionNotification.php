@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Events\DeductionProcessed;
 use App\Jobs\SendDeductionNotificationJob;
+use App\Services\NotificationService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Support\Facades\Log;
@@ -11,6 +12,16 @@ use Illuminate\Support\Facades\Log;
 class SendDeductionNotification implements ShouldQueue
 {
     use InteractsWithQueue;
+
+    protected NotificationService $notificationService;
+
+    /**
+     * Create the event listener.
+     */
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
+    }
 
     /**
      * Handle the event - Dispatch job to send both email and SMS notifications.
@@ -27,6 +38,23 @@ class SendDeductionNotification implements ShouldQueue
                 $event->deductionType,
                 'both' // Send via both SMS and email
             );
+
+            // Create database notification for the employee
+            $this->notificationService->create($event->user, 'deduction_processed', [
+                'deduction_id' => $event->deduction->id,
+                'loan_id' => $event->loan->id,
+                'loan_number' => $event->loan->loan_number,
+                'amount' => number_format($event->deduction->deduction_amount, 2),
+                'new_balance' => number_format($event->newLoanBalance, 2),
+                'deduction_type' => $event->deductionType,
+                'action_url' => config('app.url') . '/loans/' . $event->loan->id,
+            ]);
+
+            Log::info('Deduction processed notification created for employee', [
+                'user_id' => $event->user->id,
+                'loan_id' => $event->loan->id,
+                'deduction_id' => $event->deduction->id
+            ]);
 
         } catch (\Exception $e) {
             Log::error('=== FAILED TO DISPATCH DEDUCTION NOTIFICATION JOB ===');

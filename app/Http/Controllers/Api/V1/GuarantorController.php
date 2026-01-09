@@ -28,7 +28,7 @@ class GuarantorController extends Controller
                 ->where('guarantor_id', $guarantorId)
                 ->update([
                     'status' => $request->response,
-                    'response' => $validated['reason'] ?? null,
+                    'response' => $request->reason ?? null,
                     'updated_at' => now(),
                 ]);
 

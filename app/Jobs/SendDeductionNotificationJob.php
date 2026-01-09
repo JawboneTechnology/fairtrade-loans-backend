@@ -149,19 +149,20 @@ class SendDeductionNotificationJob implements ShouldQueue
         SMSService $smsService
     ): void {
         try {
-            $message = $this->getSmsMessageByDeductionType(
-                $this->deductionType,
-                $userName,
-                $deduction->deduction_amount,
-                $loan->loan_number,
-                $this->newLoanBalance
-            );
+            $templateType = $this->getSmsTemplateTypeByDeductionType($this->deductionType);
+            
+            $templateData = [
+                'user_name' => $userName,
+                'loan_number' => $loan->loan_number,
+                'amount' => number_format($deduction->deduction_amount, 2),
+                'loan_balance' => number_format($this->newLoanBalance, 2),
+            ];
 
-            $smsService->sendSMS(
+            $smsService->sendSMSFromTemplate(
                 $user->phone_number,
-                $message,
-                $user->id,
-                'Deduction Notification'
+                $templateType,
+                $templateData,
+                $user->id
             );
 
         } catch (\Exception $e) {
@@ -178,42 +179,23 @@ class SendDeductionNotificationJob implements ShouldQueue
     }
 
     /**
-     * Get SMS message based on deduction type
+     * Get SMS template type based on deduction type
      */
-    private function getSmsMessageByDeductionType(
-        string $deductionType,
-        string $userName,
-        float $amount,
-        string $loanNumber,
-        float $newBalance
-    ): string {
-        $formattedAmount = number_format($amount, 2);
-        $formattedBalance = number_format($newBalance, 2);
-
+    private function getSmsTemplateTypeByDeductionType(string $deductionType): string
+    {
         return match ($deductionType) {
-            'Manual' => "Dear {$userName}, Manual deduction of KES {$formattedAmount} has been processed for loan {$loanNumber}. New balance: KES {$formattedBalance}. Thank you!",
-            
-            'Automatic' => "Dear {$userName}, Automatic deduction of KES {$formattedAmount} has been processed for loan {$loanNumber}. New balance: KES {$formattedBalance}. Thank you!",
-            
-            'Bank_Transfer' => "Dear {$userName}, Your bank transfer of KES {$formattedAmount} for loan {$loanNumber} has been received. New balance: KES {$formattedBalance}. Thank you!",
-            
-            'Mobile_Money' => "Dear {$userName}, Your mobile money payment of KES {$formattedAmount} for loan {$loanNumber} has been received. New balance: KES {$formattedBalance}. Thank you!",
-            
-            'Online_Payment' => "Dear {$userName}, Your online payment of KES {$formattedAmount} for loan {$loanNumber} has been confirmed. New balance: KES {$formattedBalance}. Thank you!",
-            
-            'Cheque' => "Dear {$userName}, Your cheque payment of KES {$formattedAmount} for loan {$loanNumber} has been cleared. New balance: KES {$formattedBalance}. Thank you!",
-            
-            'Cash' => "Dear {$userName}, Cash payment of KES {$formattedAmount} for loan {$loanNumber} has been received. New balance: KES {$formattedBalance}. Thank you!",
-            
-            'Partial_Payments' => "Dear {$userName}, Partial payment of KES {$formattedAmount} for loan {$loanNumber} has been received. New balance: KES {$formattedBalance}. Thank you!",
-            
-            'Early_Repayments' => "Dear {$userName}, Early repayment of KES {$formattedAmount} for loan {$loanNumber} has been processed. New balance: KES {$formattedBalance}. Thank you for paying ahead!",
-            
-            'Penalty_Payments' => "Dear {$userName}, Penalty payment of KES {$formattedAmount} for loan {$loanNumber} has been received. New balance: KES {$formattedBalance}. Thank you!",
-            
-            'Refunds' => "Dear {$userName}, Refund of KES {$formattedAmount} has been processed for loan {$loanNumber}. New balance: KES {$formattedBalance}. Thank you!",
-            
-            default => "Dear {$userName}, Payment of KES {$formattedAmount} for loan {$loanNumber} has been received. New balance: KES {$formattedBalance}. Thank you!",
+            'Manual' => 'deduction_manual',
+            'Automatic' => 'deduction_automatic',
+            'Bank_Transfer' => 'deduction_bank_transfer',
+            'Mobile_Money' => 'deduction_mobile_money',
+            'Online_Payment' => 'deduction_online_payment',
+            'Cheque' => 'deduction_cheque',
+            'Cash' => 'deduction_cash',
+            'Partial_Payments' => 'deduction_partial',
+            'Early_Repayments' => 'deduction_early_repayment',
+            'Penalty_Payments' => 'deduction_penalty',
+            'Refunds' => 'deduction_refund',
+            default => 'deduction_manual',
         };
     }
 

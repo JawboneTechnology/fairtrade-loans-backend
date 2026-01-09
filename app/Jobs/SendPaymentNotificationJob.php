@@ -138,14 +138,14 @@ class SendPaymentNotificationJob implements ShouldQueue
         SMSService $smsService
     ): void {
         try {
-            // Build SMS message
-            $message = $this->buildSMSMessage($userName, $transaction, $loan);
+            // Build template data
+            $templateData = $this->buildSMSTemplateData($userName, $transaction, $loan);
 
             // Format phone number
             $phoneNumber = $this->formatPhoneNumber($user->phone_number);
 
-            // Send SMS
-            $smsService->sendSMS($phoneNumber, $message);
+            // Send SMS using template
+            $smsService->sendSMSFromTemplate($phoneNumber, 'payment_received', $templateData, $user->id);
         } catch (\Exception $e) {
             Log::error('=== FAILED TO SEND PAYMENT NOTIFICATION VIA SMS ===');
             Log::error('Error: ' . $e->getMessage());
@@ -155,13 +155,13 @@ class SendPaymentNotificationJob implements ShouldQueue
     }
 
     /**
-     * Build the SMS message for payment success
+     * Build template data for payment SMS
      */
-    private function buildSMSMessage(
+    private function buildSMSTemplateData(
         string $userName,
         MpesaTransaction $transaction,
         Loan $loan
-    ): string {
+    ): array {
         $amount         = number_format($transaction->amount, 2);
         $newBalance     = number_format($this->newLoanBalance, 2);
         $loanNumber     = $loan->loan_number;
@@ -170,9 +170,15 @@ class SendPaymentNotificationJob implements ShouldQueue
             $transaction->transaction_date->format('d/m/Y H:i') : 
             now()->format('d/m/Y H:i');
 
-        return "Dear {$userName}, your payment of KES {$amount} for loan {$loanNumber} has been received successfully. "
-             . "Receipt: {$receiptNumber}. New loan balance: KES {$newBalance}. "
-             . "Payment processed on {$paymentDate} via {$this->paymentMethod}. Thank you!";
+        return [
+            'user_name' => $userName,
+            'loan_number' => $loanNumber,
+            'amount' => $amount,
+            'receipt_number' => $receiptNumber,
+            'payment_date' => $paymentDate,
+            'payment_method' => $this->paymentMethod,
+            'loan_balance' => $newBalance,
+        ];
     }
 
     /**

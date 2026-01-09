@@ -28,12 +28,36 @@ class RolesAndPermissionsSeeder extends Seeder
         }
 
         // Create roles "admin", "manager", "employee", "hr", "supervisor"
-        $supaAdmin  =       Role::firstOrCreate(['name' => 'super-admin', 'guard_name' => 'web']);
-        $admin      =       Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
-        $manager    =       Role::firstOrCreate(['name' => 'manager', 'guard_name' => 'web']);
-        $supervisor =       Role::firstOrCreate(['name' => 'supervisor', 'guard_name' => 'web']);
-        $hr         =       Role::firstOrCreate(['name' => 'hr', 'guard_name' => 'web']);
-        $employee   =       Role::firstOrCreate(['name' => 'employee', 'guard_name' => 'web']);
+        $supaAdmin  = Role::firstOrCreate(
+            ['name' => 'super-admin', 'guard_name' => 'web'],
+            ['display_name' => 'Super Administrator', 'is_system_role' => true, 'priority' => 100, 'description' => 'Has all permissions and system access']
+        );
+        $admin      = Role::firstOrCreate(
+            ['name' => 'admin', 'guard_name' => 'web'],
+            ['display_name' => 'Administrator', 'is_system_role' => true, 'priority' => 90, 'description' => 'Has most permissions except delete operations']
+        );
+        $manager    = Role::firstOrCreate(
+            ['name' => 'manager', 'guard_name' => 'web'],
+            ['display_name' => 'Manager', 'is_system_role' => true, 'priority' => 70, 'description' => 'Can create, update, and view resources']
+        );
+        $supervisor = Role::firstOrCreate(
+            ['name' => 'supervisor', 'guard_name' => 'web'],
+            ['display_name' => 'Supervisor', 'is_system_role' => true, 'priority' => 60, 'description' => 'Can create, update, and view resources']
+        );
+        $hr         = Role::firstOrCreate(
+            ['name' => 'hr', 'guard_name' => 'web'],
+            ['display_name' => 'Human Resources', 'is_system_role' => true, 'priority' => 50, 'description' => 'Can create and view resources']
+        );
+        $employee   = Role::firstOrCreate(
+            ['name' => 'employee', 'guard_name' => 'web'],
+            ['display_name' => 'Employee', 'is_system_role' => true, 'priority' => 10, 'description' => 'Limited permissions for employees']
+        );
+        
+        // Check if employer role exists
+        $employer = Role::firstOrCreate(
+            ['name' => 'employer', 'guard_name' => 'web'],
+            ['display_name' => 'Employer', 'is_system_role' => true, 'priority' => 80, 'description' => 'Employer-specific permissions']
+        );
 
         // Assign all permissions to super-admin
         $supaAdmin->givePermissionTo(Permission::all());
